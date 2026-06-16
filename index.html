@@ -1,0 +1,1597 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebGL Demos · Particles / Fluid / Voyager 1</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #02060b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #nav { height: 42px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: #06090f; border-bottom: 1px solid rgba(255,255,255,.08); }
+  #nav .brand { color: #89b4fa; font-size: 13px; font-weight: 600; letter-spacing: .04em; margin-right: 14px; }
+  #nav button { cursor: pointer; font: 12px ui-monospace, monospace; color: #cdd6f4; background: rgba(137,180,250,.10); border: 1px solid rgba(137,180,250,.28); border-radius: 6px; padding: 5px 14px; }
+  #nav button:hover { background: rgba(137,180,250,.2); }
+  #nav button.on { background: rgba(137,180,250,.3); border-color: #89b4fa; color: #fff; }
+  #frame { display: block; width: 100vw; height: calc(100vh - 42px); border: 0; background: #02060b; }
+</style>
+</head>
+<body>
+  <div id="nav">
+    <span class="brand">⟁ WebGL DEMOS</span>
+    <button data-demo="particles" class="on">◍ Particles</button>
+    <button data-demo="fluid">≈ Fluid</button>
+    <button data-demo="voyager">☄ Voyager 1</button>
+  </div>
+  <iframe id="frame" title="demo"></iframe>
+<script type="text/html" id="src-particles">
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebGL Particle Simulation</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #04050a; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+
+  #ui {
+    position: fixed; top: 12px; left: 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #cdd6f4; background: rgba(10,12,20,.55);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px; padding: 12px 14px;
+    width: 244px; user-select: none;
+  }
+  #ui h1 { font-size: 13px; font-weight: 600; letter-spacing: .03em; margin-bottom: 8px; color: #89b4fa; }
+  #ui .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  #ui label { opacity: .8; white-space: nowrap; }
+  #ui input[type=range] { width: 104px; accent-color: #89b4fa; }
+  #ui .val { width: 38px; text-align: right; opacity: .9; color: #a6e3a1; }
+  #ui select { background:#1e1e2e; color:#cdd6f4; border:1px solid rgba(255,255,255,.12);
+    border-radius:5px; padding:2px 6px; font:11px ui-monospace,monospace; }
+  #ui .sep { height:1px; background:rgba(255,255,255,.08); margin:10px 0; }
+  #ui .hint { margin-top: 10px; opacity: .55; font-size: 11px; line-height: 1.45; }
+  #ui .btnrow { display:flex; gap:6px; margin-top:10px; }
+  #ui button {
+    flex:1; cursor:pointer; font:11px ui-monospace,monospace; color:#cdd6f4;
+    background:rgba(137,180,250,.12); border:1px solid rgba(137,180,250,.3);
+    border-radius:6px; padding:5px 0;
+  }
+  #ui button:hover { background:rgba(137,180,250,.25); }
+  #ui button.on { background:rgba(166,227,161,.22); border-color:rgba(166,227,161,.5); color:#a6e3a1; }
+  #stats { position: fixed; bottom: 12px; left: 12px;
+    font: 12px ui-monospace, monospace; color: #6c7086; user-select: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div id="ui">
+  <h1>⟁ PARTICLE SIM</h1>
+
+  <div class="row">
+    <label>Behavior</label>
+    <select id="behavior">
+      <option value="0">Swirl</option>
+      <option value="1" selected>Flow Field</option>
+      <option value="2">Cluster (N-body)</option>
+      <option value="3">Warp ✦</option>
+      <option value="4">Solar System ☉</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Palette</label>
+    <select id="palette">
+      <option value="0">Spectrum</option>
+      <option value="1">Fire</option>
+      <option value="2">Ice</option>
+      <option value="3" selected>Galaxy</option>
+      <option value="4">Mono</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Count</label>
+    <select id="count">
+      <option value="65536">65 K</option>
+      <option value="262144" selected>262 K</option>
+      <option value="1048576">1 M</option>
+    </select>
+  </div>
+
+  <div class="sep"></div>
+
+  <div class="row"><label>Field</label><input id="field" type="range" min="0" max="4" step="0.05" value="1.6"><span class="val" id="fieldV">1.6</span></div>
+  <div class="row"><label>Gravity</label><input id="gravity" type="range" min="0" max="3" step="0.05" value="0.3"><span class="val" id="gravityV">0.3</span></div>
+  <div class="row"><label>Mouse</label><input id="force" type="range" min="0" max="5" step="0.05" value="2"><span class="val" id="forceV">2.0</span></div>
+  <div class="row"><label>Damping</label><input id="damp" type="range" min="0.90" max="1.0" step="0.001" value="0.97"><span class="val" id="dampV">.970</span></div>
+
+  <div class="sep"></div>
+
+  <div class="row"><label>Trails</label><input id="persist" type="range" min="0" max="0.98" step="0.01" value="0.90"><span class="val" id="persistV">.90</span></div>
+  <div class="row"><label>Size</label><input id="psize" type="range" min="1" max="6" step="0.5" value="1.5"><span class="val" id="psizeV">1.5</span></div>
+
+  <div class="btnrow">
+    <button id="mode">Pull</button>
+    <button id="demo">Demo</button>
+    <button id="reset">Reset</button>
+  </div>
+  <div class="hint">2D modes: move mouse to push/pull, click = burst.<br>Solar: drag to pan, wheel to zoom, double-click resumes tour.</div>
+</div>
+
+<div id="stats">—</div>
+
+<script type="text/javascript">
+"use strict";
+window.addEventListener("error", (e) => {
+  const d = document.createElement("pre");
+  d.style.cssText = "position:fixed;right:12px;top:12px;max-width:46vw;max-height:90vh;overflow:auto;z-index:99;color:#f38ba8;background:rgba(20,10,14,.92);border:1px solid #f38ba8;border-radius:8px;padding:12px;font:11px ui-monospace,monospace;white-space:pre-wrap";
+  d.textContent = "⚠ " + (e.error && e.error.stack ? e.error.stack : e.message);
+  document.body.appendChild(d);
+});
+(function () {
+  const canvas = document.getElementById("gl");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, premultipliedAlpha: false });
+  const fail = (m) => { document.body.innerHTML = "<p style='color:#f38ba8;font:16px monospace;padding:40px'>" + m + "</p>"; };
+  if (!gl) { fail("WebGL2를 지원하지 않는 브라우저입니다."); return; }
+  if (!gl.getExtension("EXT_color_buffer_float")) { fail("EXT_color_buffer_float 미지원: float 텍스처 렌더 불가."); return; }
+  gl.getExtension("OES_texture_float_linear"); // optional, improves density sampling
+
+  // ---------------- shader helpers ----------------
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + "\n" + src);
+    return s;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+  function uniforms(p, names) { const o = {}; names.forEach(n => o[n] = gl.getUniformLocation(p, "u_" + n)); return o; }
+
+  // ---------------- GLSL building blocks ----------------
+  // Ashima 2D simplex noise (public domain) — used for the curl flow field.
+  const SNOISE = `
+  vec3 mod289(vec3 x){return x - floor(x*(1.0/289.0))*289.0;}
+  vec2 mod289(vec2 x){return x - floor(x*(1.0/289.0))*289.0;}
+  vec3 permute(vec3 x){return mod289(((x*34.0)+1.0)*x);}
+  float snoise(vec2 v){
+    const vec4 C = vec4(0.211324865405187,0.366025403784439,-0.577350269189626,0.024390243902439);
+    vec2 i  = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+    vec2 i1 = (x0.x > x0.y) ? vec2(1.0,0.0) : vec2(0.0,1.0);
+    vec4 x12 = x0.xyxy + C.xxzz; x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute(permute(i.y + vec3(0.0,i1.y,1.0)) + i.x + vec3(0.0,i1.x,1.0));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m; m = m*m;
+    vec3 x = 2.0*fract(p*C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314*(a0*a0 + h*h);
+    vec3 g;
+    g.x = a0.x*x0.x + h.x*x0.y;
+    g.yz = a0.yz*x12.xz + h.yz*x12.yw;
+    return 130.0*dot(m, g);
+  }
+  // curl of a noise potential -> divergence-free (fluid-like) flow
+  vec2 curl(vec2 p){
+    float e = 0.12;
+    float dx = snoise(p + vec2(0.0,e)) - snoise(p - vec2(0.0,e));
+    float dy = snoise(p + vec2(e,0.0)) - snoise(p - vec2(e,0.0));
+    return vec2(dx, -dy);
+  }
+  vec2 hash22(vec2 p){
+    p = vec2(dot(p, vec2(127.1,311.7)), dot(p, vec2(269.5,183.3)));
+    return fract(sin(p) * 43758.5453123);
+  }`;
+
+  const quadVS = `#version 300 es
+  in vec2 a_pos; out vec2 v_uv;
+  void main(){ v_uv = a_pos*0.5 + 0.5; gl_Position = vec4(a_pos,0.0,1.0); }`;
+
+  // ---- solar system definition (single source for shader + JS camera) ----
+  const SUN = { r: 0.10, c: [1.00, 0.95, 0.82] };          // warm white, not gaudy gold
+  const PLANETS = [
+    { r:0.20, w:1.70, p:0.0, s:0.013, c:[0.66,0.60,0.55] }, // Mercury – grey-brown
+    { r:0.28, w:1.25, p:1.1, s:0.020, c:[0.85,0.76,0.58] }, // Venus – pale cream
+    { r:0.38, w:1.00, p:2.2, s:0.024, c:[0.30,0.55,0.82] }, // Earth – ocean blue
+    { r:0.48, w:0.80, p:3.3, s:0.018, c:[0.78,0.42,0.32] }, // Mars – rust
+    { r:0.70, w:0.42, p:4.4, s:0.055, c:[0.78,0.68,0.56] }, // Jupiter – muted tan
+    { r:0.92, w:0.30, p:5.5, s:0.045, c:[0.82,0.76,0.62] }, // Saturn – soft sand
+    { r:1.10, w:0.22, p:0.7, s:0.030, c:[0.56,0.80,0.82] }, // Uranus – pale cyan
+    { r:1.26, w:0.17, p:1.9, s:0.030, c:[0.34,0.46,0.80] }, // Neptune – deep blue
+  ];
+  // moons: which planet (pi), orbit radius multiple of planet size, angular speed, phase
+  const MOONS = [
+    { pi:2, rmul:2.6, sp:2.2, ph:0.0 },                                  // Earth – Moon
+    { pi:3, rmul:2.2, sp:2.6, ph:1.0 }, { pi:3, rmul:3.0, sp:1.9, ph:3.0 }, // Mars – Phobos, Deimos
+    { pi:4, rmul:1.7, sp:3.0, ph:0.5 }, { pi:4, rmul:2.3, sp:2.4, ph:2.0 }, // Jupiter – Galilean ×4
+    { pi:4, rmul:3.0, sp:1.9, ph:3.5 }, { pi:4, rmul:3.8, sp:1.5, ph:5.0 },
+    { pi:5, rmul:3.2, sp:2.0, ph:1.5 }, { pi:5, rmul:4.0, sp:1.6, ph:3.0 }, // Saturn – beyond the ring
+    { pi:6, rmul:2.6, sp:2.3, ph:0.8 }, { pi:6, rmul:3.6, sp:1.7, ph:2.6 }, // Uranus
+    { pi:7, rmul:2.8, sp:2.1, ph:1.2 },                                  // Neptune – Triton
+  ];
+  const MOON_N = MOONS.length;
+  const glslArr = (xs) => "float[](" + xs.map(x => x.toFixed(4)).join(",") + ")";
+  const SOLAR_GLSL = `
+    const float oR[8] = ${glslArr(PLANETS.map(p=>p.r))};
+    const float oW[8] = ${glslArr(PLANETS.map(p=>p.w))};
+    const float oP[8] = ${glslArr(PLANETS.map(p=>p.p))};
+    const float oS[8] = ${glslArr(PLANETS.map(p=>p.s))};
+    const float mPI[${MOON_N}] = ${glslArr(MOONS.map(m=>m.pi))};
+    const float mRM[${MOON_N}] = ${glslArr(MOONS.map(m=>m.rmul))};
+    const float mSP[${MOON_N}] = ${glslArr(MOONS.map(m=>m.sp))};
+    const float mPH[${MOON_N}] = ${glslArr(MOONS.map(m=>m.ph))};`;
+  const ASTEROID_C = [0.52, 0.50, 0.48], COMET_C = [0.75, 0.95, 1.00], MOON_C = [0.78, 0.78, 0.80];
+  const BODY_GLSL = (() => {
+    const cols = [SUN.c, ...PLANETS.map(p=>p.c), ASTEROID_C, COMET_C, MOON_C]; // 0 sun,1..8 planets,9 asteroid,10 comet,11 moon
+    const items = cols.map(c => `vec3(${c[0].toFixed(3)},${c[1].toFixed(3)},${c[2].toFixed(3)})`).join(",");
+    return `const vec3 BODY[12] = vec3[](${items});`;
+  })();
+
+  // ---------------- simulation pass ----------------
+  const simFS = `#version 300 es
+  precision highp float;
+  precision highp int;
+  uniform sampler2D u_pos, u_vel, u_density;
+  uniform vec2 u_mouse; uniform float u_mouseActive;
+  uniform float u_dt, u_gravity, u_force, u_damp, u_mode, u_burst, u_aspect;
+  uniform int u_behavior, u_texW; uniform float u_field, u_time;
+  layout(location=0) out vec4 outPos;
+  layout(location=1) out vec4 outVel;
+  ${SNOISE}
+  ${SOLAR_GLSL}
+  void main(){
+    ivec2 t = ivec2(gl_FragCoord.xy);
+    vec4 P = texelFetch(u_pos, t, 0);
+    vec4 V = texelFetch(u_vel, t, 0);
+    vec2 pos = P.xy, vel = V.xy;
+
+    // --- Warp / space travel: depth flies toward camera, respawn at far plane ---
+    if (u_behavior == 3) {
+      float z = P.z - (0.12 + u_field * 0.30) * u_dt;
+      vec2 sxy = pos;
+      if (z <= 0.02) {
+        vec2 h1 = hash22(gl_FragCoord.xy * 1.37 + u_time);
+        vec2 h2 = hash22(gl_FragCoord.xy * 2.71 - u_time * 1.3);
+        sxy = (h1 * 2.0 - 1.0) * 1.35;
+        z = mix(0.30, 1.0, h2.x);
+      }
+      outPos = vec4(sxy, z, 1.0);
+      outVel = vec4(0.0, 0.0, V.b, 1.0);
+      return;
+    }
+    // --- Solar system: sun, planets, comet, asteroid belt (+ shading) ---
+    if (u_behavior == 4) {
+      int id = int(gl_FragCoord.y) * u_texW + int(gl_FragCoord.x);
+      float fid = float(id);
+      float sel = hash22(vec2(fid, 1.0)).x;
+      vec2 h  = hash22(vec2(fid, 3.0));
+      vec2 h2 = hash22(vec2(fid, 9.0));
+      float la = h.x * 6.28318;
+      vec2 wp; float bc; float shade; float sm = 1.0;    // sm = per-body point-size multiplier
+
+      if (sel < 0.18) {                                  // SUN
+        float lr = sqrt(h.y) * ${SUN.r.toFixed(3)};
+        float spin = u_time * 0.30;
+        wp = vec2(cos(la + spin), sin(la + spin)) * lr;
+        bc = 0.0;
+        float rr = lr / ${SUN.r.toFixed(3)};             // 0 core .. 1 edge
+        shade = (1.75 - 0.65 * rr) + 0.22 * snoise(wp * 20.0 + vec2(u_time)); // hot white core, warm edge
+        sm = 3.0;                                        // big soft particles -> glowing orb, not confetti
+      } else if (sel < 0.21) {                           // COMET (head + radial tail)
+        float ct = u_time * 0.16;
+        vec2 head = vec2(cos(ct) * 1.30, sin(ct) * 0.55) + vec2(-0.05, 0.0);
+        float frac = h.y;
+        vec2 tailDir = normalize(head + 1e-4);           // tails point away from the sun
+        wp = head + tailDir * frac * 0.40 + (h2 - 0.5) * 0.05 * frac;
+        bc = 10.0 / 16.0;
+        shade = 1.30 * (1.0 - frac * 0.85);              // bright head, fading tail
+        sm = 1.6 - frac;
+      } else if (sel < 0.33) {                           // ASTEROID BELT (between Mars & Jupiter)
+        float ar = mix(0.54, 0.66, h.y);
+        float aa = la + u_time * 0.12;
+        wp = vec2(cos(aa), sin(aa)) * ar;
+        bc = 9.0 / 16.0;
+        shade = 0.45 + 0.40 * h2.x;
+        sm = 0.7;
+      } else if (sel < 0.40) {                           // MOONS orbiting planets
+        int mi = clamp(int((sel - 0.33) / 0.07 * float(${MOON_N})), 0, ${MOON_N - 1});
+        int pi = int(mPI[mi]);
+        float pang = oP[pi] + oW[pi] * u_time * 0.25;
+        vec2 pcenter = vec2(cos(pang), sin(pang)) * oR[pi];
+        float mr = oS[pi] * mRM[mi];
+        float mang = mPH[mi] + mSP[mi] * u_time;
+        vec2 mcenter = pcenter + vec2(cos(mang), sin(mang)) * mr;
+        float MR = oS[pi] * 0.42;
+        float lr = sqrt(h.y) * MR;
+        vec2 local = vec2(cos(la), sin(la)) * lr;
+        wp = mcenter + local;
+        bc = 11.0 / 16.0;
+        float rn = clamp(lr / max(MR, 1e-4), 0.0, 1.0);
+        float nz = sqrt(max(0.0, 1.0 - rn * rn));
+        vec3 N = vec3(local / max(MR, 1e-4), nz);
+        shade = 0.22 + 0.85 * max(dot(N, normalize(vec3(normalize(-mcenter), 0.35))), 0.0);
+      } else {                                           // PLANET
+        int pi = clamp(int(floor((sel - 0.40) / 0.60 * 8.0)), 0, 7);
+        float ang = oP[pi] + oW[pi] * u_time * 0.25;
+        vec2 center = vec2(cos(ang), sin(ang)) * oR[pi];
+        float R = oS[pi];
+        float lr = sqrt(h.y) * R;
+        vec2 local = vec2(cos(la), sin(la)) * lr;
+        bool ring = (pi == 5 && h2.x > 0.40);            // Saturn ring
+        if (ring) {
+          // two ring bands with a Cassini-division gap, tilted
+          float rt = h2.y, rr;
+          if (rt < 0.45) rr = mix(R * 1.5, R * 2.0, rt / 0.45);     // inner (B ring)
+          else           rr = mix(R * 2.2, R * 2.75, (rt - 0.45) / 0.55); // outer (A ring)
+          vec2 e = vec2(cos(la) * rr, sin(la) * rr * 0.30);
+          float cs = 0.92, sn = 0.39;                    // ~23° tilt
+          local = vec2(e.x * cs - e.y * sn, e.x * sn + e.y * cs);
+        }
+        wp = center + local;
+        bc = (float(pi) + 1.0) / 16.0;
+        // fake-sphere lighting from the sun (origin) -> 3D planet look
+        float rn = clamp(lr / max(R, 1e-4), 0.0, 1.0);
+        float nz = sqrt(max(0.0, 1.0 - rn * rn));
+        vec3 N = vec3(local / max(R, 1e-4), nz);
+        vec3 L = normalize(vec3(normalize(-center), 0.35));
+        shade = 0.16 + 0.95 * max(dot(N, L), 0.0);
+        if (pi == 4 || pi == 5) shade *= 0.78 + 0.32 * sin(local.y / R * 6.5 + snoise(local * 26.0)); // gas bands
+        else                    shade *= 0.82 + 0.30 * snoise(local * 42.0 + center * 7.0);            // mottling
+        if (ring) shade = (0.40 + 0.35 * h2.y) * (0.78 + 0.22 * sin(length(local) / R * 26.0)); // ringlet banding
+      }
+      outPos = vec4(wp, 0.0, 1.0);
+      outVel = vec4(shade, sm, bc, 1.0);
+      return;
+    }
+
+    // behavior force
+    if (u_behavior == 0) {                       // Swirl: tangential around centre
+      vec2 r = pos; float l = length(r) + 1e-4;
+      vec2 tang = vec2(-r.y, r.x) / l;
+      vel += tang * u_field * 0.6 * u_dt;
+    } else if (u_behavior == 1) {                // Flow field via curl noise
+      vec2 f = curl(pos * 1.7 + vec2(u_time * 0.08));
+      vel += f * u_field * 1.4 * u_dt;
+    } else {                                     // Cluster: climb density gradient (N-body approx)
+      vec2 uv = vec2(pos.x / u_aspect, pos.y) * 0.5 + 0.5;
+      float px = 1.0 / 256.0;
+      float l = texture(u_density, uv - vec2(px,0.0)).r;
+      float rr = texture(u_density, uv + vec2(px,0.0)).r;
+      float dn = texture(u_density, uv - vec2(0.0,px)).r;
+      float up = texture(u_density, uv + vec2(0.0,px)).r;
+      vec2 grad = vec2(rr - l, up - dn);
+      grad = clamp(grad * 0.6, -1.0, 1.0);
+      vel += grad * u_field * 2.5 * u_dt;
+    }
+
+    // mouse attract / repel
+    vec2 d = u_mouse - pos;
+    float dist2 = dot(d,d) + 0.0008;
+    vec2 dir = d * inversesqrt(dist2);
+    float f = clamp(u_force * u_mouseActive / dist2, -40.0, 40.0);
+    vel += dir * f * u_mode * u_dt;
+
+    // burst impulse
+    if (u_burst > 0.0) vel -= dir * u_burst * exp(-dist2 * 6.0);
+
+    // gentle centre pull for cohesion + integrate
+    vel += (-pos) * u_gravity * 0.25 * u_dt;
+    vel *= u_damp;
+    float sp = length(vel); if (sp > 6.0) vel *= 6.0/sp;   // clamp for stability
+    pos += vel * u_dt;
+
+    // reflect at bounds
+    if (pos.x >  u_aspect){ pos.x= u_aspect; vel.x=-abs(vel.x)*0.6; }
+    if (pos.x < -u_aspect){ pos.x=-u_aspect; vel.x= abs(vel.x)*0.6; }
+    if (pos.y >  1.0){ pos.y= 1.0; vel.y=-abs(vel.y)*0.6; }
+    if (pos.y < -1.0){ pos.y=-1.0; vel.y= abs(vel.y)*0.6; }
+
+    outPos = vec4(pos, 0.0, 1.0);
+    outVel = vec4(vel, V.b, 1.0);
+  }`;
+
+  // ---------------- particle vertex (shared by density + render) ----------------
+  function particleVS(extra) { return `#version 300 es
+  precision highp float;
+  precision highp int;
+  uniform sampler2D u_pos, u_vel;
+  uniform vec2 u_texRes, u_camPos; uniform float u_aspect, u_pointSize, u_camZoom;
+  uniform int u_behavior;
+  out float v_speed, v_seed;
+  void main(){
+    int id = gl_VertexID; int w = int(u_texRes.x);
+    ivec2 t = ivec2(id % w, id / w);
+    vec4 P = texelFetch(u_pos, t, 0);
+    vec4 V = texelFetch(u_vel, t, 0);
+    v_seed = V.b;
+    if (u_behavior == 3) {                         // Warp: perspective-divide depth
+      float z = max(P.z, 0.02);
+      vec2 proj = P.xy / z;
+      v_speed = (1.0 - P.z) * 2.2;
+      gl_Position = vec4(proj.x / u_aspect, proj.y, 0.0, 1.0);
+      gl_PointSize = ${extra} * (0.6 + (1.0 - P.z) * 3.4);
+    } else {                                       // 2D modes + solar tour camera
+      v_speed = (u_behavior == 4) ? V.x : length(V.xy);   // solar: V.x carries shading
+      vec2 c = (P.xy - u_camPos) * u_camZoom;
+      gl_Position = vec4(c.x / u_aspect, c.y, 0.0, 1.0);
+      gl_PointSize = ${extra} * ((u_behavior == 4) ? (0.7 + u_camZoom * 0.22) * V.y : 1.0); // V.y = per-body size
+    }
+  }`; }
+
+  const densityFS = `#version 300 es
+  precision highp float;
+  out vec4 frag;
+  void main(){ frag = vec4(0.04); }`;   // additive mass accumulation
+
+  const renderFS = `#version 300 es
+  precision highp float;
+  precision highp int;
+  in float v_speed, v_seed;
+  uniform int u_palette, u_behavior;
+  ${BODY_GLSL}
+  out vec4 frag;
+  vec3 ramp(float x, vec3 a, vec3 b, vec3 c, vec3 d){
+    vec3 col = mix(a,b,smoothstep(0.0,0.34,x));
+    col = mix(col,c,smoothstep(0.34,0.67,x));
+    return mix(col,d,smoothstep(0.67,1.0,x));
+  }
+  vec3 palette(float s){
+    float x = clamp(s*0.42, 0.0, 1.0);
+    if (u_palette==0) return ramp(x, vec3(.10,.30,.85), vec3(.45,.90,.95), vec3(1.,.75,.25), vec3(1.,.30,.45));
+    if (u_palette==1) return ramp(x, vec3(.25,.02,.0),  vec3(.95,.25,.05), vec3(1.,.70,.10), vec3(1.,.97,.80));
+    if (u_palette==2) return ramp(x, vec3(.02,.10,.35),  vec3(.10,.55,.85), vec3(.55,.90,1.0), vec3(.95,1.,1.));
+    if (u_palette==3) return ramp(x, vec3(.18,.02,.35),  vec3(.65,.10,.75), vec3(.25,.45,1.0), vec3(.95,.85,1.));
+    float g = 0.35 + 0.65*x; return vec3(g);
+  }
+  void main(){
+    vec2 q = gl_PointCoord - 0.5;
+    float r = dot(q,q);
+    if (r > 0.25) discard;
+    float alpha = smoothstep(0.25, 0.0, r);
+    vec3 col;
+    if (u_behavior == 4) {                       // solar: body colour * per-particle shade
+      int b = clamp(int(v_seed * 16.0 + 0.5), 0, 11);
+      col = BODY[b] * v_speed;
+    } else {
+      col = palette(v_speed) * (0.72 + 0.28*v_seed);
+    }
+    frag = vec4(col * alpha, alpha);
+  }`;
+
+  const fadeFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_tex; uniform float u_fade;
+  out vec4 frag;
+  void main(){ frag = texture(u_tex, v_uv) * u_fade; }`;
+
+  const presentFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_tex;
+  out vec4 frag;
+  void main(){ frag = vec4(texture(u_tex, v_uv).rgb, 1.0); }`;
+
+  // ---------------- programs ----------------
+  const simProg     = program(quadVS, simFS);
+  const densityProg = program(particleVS("1.0"), densityFS);
+  const renderProg  = program(particleVS("u_pointSize"), renderFS);
+  const fadeProg    = program(quadVS, fadeFS);
+  const presentProg = program(quadVS, presentFS);
+
+  const SU = uniforms(simProg, ["pos","vel","density","mouse","mouseActive","dt","gravity","force","damp","mode","burst","aspect","behavior","field","time","texW"]);
+  const DU = uniforms(densityProg, ["pos","vel","texRes","aspect","camPos","camZoom","behavior"]);
+  const RU = uniforms(renderProg, ["pos","vel","texRes","aspect","pointSize","palette","behavior","camPos","camZoom"]);
+  const FU = uniforms(fadeProg, ["tex","fade"]);
+  const PU = uniforms(presentProg, ["tex"]);
+
+  // ---------------- fullscreen triangle ----------------
+  const quadVAO = gl.createVertexArray();
+  gl.bindVertexArray(quadVAO);
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  [simProg, fadeProg, presentProg].forEach(p => {
+    const loc = gl.getAttribLocation(p, "a_pos");
+    if (loc >= 0) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); }
+  });
+  gl.bindVertexArray(null);
+  const emptyVAO = gl.createVertexArray(); // for point draws (gl_VertexID only)
+
+  // ---------------- constellation + background-star overlay (solar mode) ----------------
+  const starVS = `#version 300 es
+  precision highp float;
+  in vec2 a_pos; in float a_bright;
+  uniform float u_size; out float v_b;
+  void main(){ v_b = a_bright; gl_Position = vec4(a_pos, 0.0, 1.0); gl_PointSize = u_size; }`;
+  const starFS = `#version 300 es
+  precision highp float;
+  in float v_b; uniform int u_round; uniform float u_scale; out vec4 frag;
+  void main(){
+    float a = 1.0;
+    if (u_round == 1) { vec2 q = gl_PointCoord - 0.5; float r = dot(q,q); if (r > 0.25) discard; a = smoothstep(0.25, 0.0, r); }
+    frag = vec4(vec3(0.72,0.82,1.0) * v_b * a * u_scale, v_b * a * u_scale);
+  }`;
+  const starProg = program(starVS, starFS);
+  const STU = uniforms(starProg, ["size","round","scale"]);
+
+  const CONSTELLATIONS = [
+    { stars:[[-0.86,0.55],[-0.78,0.62],[-0.70,0.66],[-0.62,0.62],[-0.56,0.74],[-0.48,0.80],[-0.44,0.71]],
+      lines:[[0,1],[1,2],[2,3],[3,6],[6,5],[5,4],[4,3]] },                       // Big Dipper
+    { stars:[[0.60,0.36],[0.83,0.30],[0.66,0.02],[0.71,-0.03],[0.76,-0.08],[0.57,-0.40],[0.87,-0.45]],
+      lines:[[0,2],[1,4],[2,3],[3,4],[2,5],[4,6]] },                             // Orion
+    { stars:[[-0.12,0.80],[-0.02,0.88],[0.08,0.80],[0.18,0.88],[0.28,0.80]],
+      lines:[[0,1],[1,2],[2,3],[3,4]] },                                         // Cassiopeia
+    { stars:[[-0.62,-0.46],[-0.62,-0.78],[-0.74,-0.60],[-0.50,-0.62]],
+      lines:[[0,1],[2,3]] },                                                     // Southern Cross
+  ];
+  let starVAOline, starVAOpoint, lineCount = 0, pointCount = 0;
+  function setupStarAttribs() {
+    const ap = gl.getAttribLocation(starProg, "a_pos"), ab = gl.getAttribLocation(starProg, "a_bright");
+    gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 2, gl.FLOAT, false, 12, 0);
+    gl.enableVertexAttribArray(ab); gl.vertexAttribPointer(ab, 1, gl.FLOAT, false, 12, 8);
+  }
+  function buildStars() {
+    const lines = [], points = [];
+    for (let i = 0; i < 340; i++)                                               // scattered background stars
+      points.push(Math.random()*2-1, Math.random()*2-1, 0.12 + Math.random()*0.42);
+    for (const c of CONSTELLATIONS) {
+      for (const s of c.stars) points.push(s[0], s[1], 0.95);                   // bright constellation stars
+      for (const e of c.lines) { const A = c.stars[e[0]], B = c.stars[e[1]]; lines.push(A[0],A[1],0.30, B[0],B[1],0.30); }
+    }
+    lineCount = lines.length / 3; pointCount = points.length / 3;
+    starVAOline = gl.createVertexArray(); gl.bindVertexArray(starVAOline);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.STATIC_DRAW);
+    setupStarAttribs();
+    starVAOpoint = gl.createVertexArray(); gl.bindVertexArray(starVAOpoint);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+    setupStarAttribs();
+    gl.bindVertexArray(null);
+  }
+  buildStars();
+
+  // ---------------- planet orbit lines (world space, follow the tour camera) ----------------
+  const orbitVS = `#version 300 es
+  precision highp float;
+  in vec2 a_pos; uniform vec2 u_camPos; uniform float u_aspect, u_camZoom;
+  void main(){ vec2 c = (a_pos - u_camPos) * u_camZoom; gl_Position = vec4(c.x / u_aspect, c.y, 0.0, 1.0); }`;
+  const orbitFS = `#version 300 es
+  precision highp float; uniform float u_alpha; out vec4 frag;
+  void main(){ frag = vec4(vec3(0.35,0.45,0.68) * u_alpha, u_alpha); }`;
+  const orbitProg = program(orbitVS, orbitFS);
+  const OU = uniforms(orbitProg, ["camPos","camZoom","aspect","alpha"]);
+  let orbitVAO, orbitCount = 0;
+  function buildOrbits() {
+    const v = [], SEG = 160;
+    for (const p of PLANETS) for (let i = 0; i < SEG; i++) {
+      const a0 = i / SEG * Math.PI * 2, a1 = (i + 1) / SEG * Math.PI * 2;
+      v.push(Math.cos(a0)*p.r, Math.sin(a0)*p.r, Math.cos(a1)*p.r, Math.sin(a1)*p.r);
+    }
+    orbitCount = v.length / 2;
+    orbitVAO = gl.createVertexArray(); gl.bindVertexArray(orbitVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STATIC_DRAW);
+    const ap = gl.getAttribLocation(orbitProg, "a_pos"); gl.enableVertexAttribArray(ap); gl.vertexAttribPointer(ap, 2, gl.FLOAT, false, 8, 0);
+    gl.bindVertexArray(null);
+  }
+  buildOrbits();
+
+  // ---------------- textures / FBOs ----------------
+  function tex(w, h, data, filter) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.FLOAT,
+      data ? new Float32Array(data) : null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+  function makeFBO(attachments) {
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    attachments.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t, 0));
+    gl.drawBuffers(attachments.map((_, i) => gl.COLOR_ATTACHMENT0 + i));
+    return f;
+  }
+
+  // particle state (RGBA32F-precision not needed; 16F is plenty for clip-space positions... use 32F for pos to avoid drift)
+  function texF32(w, h, data, internal) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+
+  const DENS = 256;
+  let densityTex = tex(DENS, DENS, null, gl.LINEAR);
+  let densityFBO = makeFBO([densityTex]);
+
+  let TEX_W, TEX_H, COUNT, ASPECT = 1, cur = 0;
+  let posTex = [], velTex = [], simFBO = [];
+  let sceneTex = [], sceneFBO = [], sceneCur = 0;
+
+  function destroySim() {
+    [...posTex, ...velTex].forEach(t => t && gl.deleteTexture(t));
+    simFBO.forEach(f => f && gl.deleteFramebuffer(f));
+    posTex = []; velTex = []; simFBO = [];
+  }
+  function initState(count) {
+    destroySim();
+    COUNT = count;
+    TEX_W = Math.ceil(Math.sqrt(count));
+    TEX_H = Math.ceil(count / TEX_W);
+    const N = TEX_W * TEX_H;
+    const pos = new Float32Array(N * 4), vel = new Float32Array(N * 4);
+    for (let i = 0; i < N; i++) {
+      const ang = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * 0.9;
+      pos[i*4]   = Math.cos(ang) * rad * ASPECT;
+      pos[i*4+1] = Math.sin(ang) * rad;
+      pos[i*4+3] = 1;
+      vel[i*4]   = -Math.sin(ang) * 0.2;
+      vel[i*4+1] =  Math.cos(ang) * 0.2;
+      vel[i*4+2] = Math.random();   // colour seed
+      vel[i*4+3] = 1;
+    }
+    posTex = [texF32(TEX_W, TEX_H, pos, gl.RGBA32F), texF32(TEX_W, TEX_H, pos, gl.RGBA32F)];
+    velTex = [texF32(TEX_W, TEX_H, vel, gl.RGBA32F), texF32(TEX_W, TEX_H, vel, gl.RGBA32F)];
+    simFBO = [makeFBO([posTex[0], velTex[0]]), makeFBO([posTex[1], velTex[1]])];
+    cur = 0;
+  }
+  function initScene() {
+    sceneTex.forEach(t => gl.deleteTexture(t));
+    sceneFBO.forEach(f => gl.deleteFramebuffer(f));
+    const w = canvas.width, h = canvas.height;
+    sceneTex = [tex(w, h, null, gl.LINEAR), tex(w, h, null, gl.LINEAR)];
+    sceneFBO = [makeFBO([sceneTex[0]]), makeFBO([sceneTex[1]])];
+    // clear both
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO[i]);
+      gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    sceneCur = 0;
+  }
+
+  // ---------------- params + interaction ----------------
+  const params = { field:1.6, gravity:0.3, force:2.0, damp:0.97, persist:0.90, pointSize:1.5,
+                   behavior:1, palette:3, mode:-1 /* -1 = pull */ };
+  const mouse = { x:0, y:0, active:0, burst:0 };
+  let demo = false, time = 0;
+
+  function clientToWorld(cx, cy) {
+    return { x: ((cx / canvas.clientWidth) * 2 - 1) * ASPECT, y: -((cy / canvas.clientHeight) * 2 - 1) };
+  }
+  canvas.addEventListener("pointermove", e => { if (demo || params.behavior >= 3) return; const w = clientToWorld(e.clientX, e.clientY); mouse.x=w.x; mouse.y=w.y; mouse.active=1; });
+  canvas.addEventListener("pointerleave", () => { if (!demo) mouse.active = 0; });
+  canvas.addEventListener("pointerdown", e => { if (demo || params.behavior >= 3) return; const w = clientToWorld(e.clientX, e.clientY); mouse.x=w.x; mouse.y=w.y; mouse.active=1; mouse.burst=30; });
+
+  // ---------------- UI ----------------
+  function slider(id, key, fmt) {
+    const el = document.getElementById(id), out = document.getElementById(id + "V");
+    const upd = () => { params[key] = parseFloat(el.value); out.textContent = fmt(params[key]); };
+    el.addEventListener("input", upd); upd();
+  }
+  slider("field","field", v=>v.toFixed(1));
+  slider("gravity","gravity", v=>v.toFixed(1));
+  slider("force","force", v=>v.toFixed(1));
+  slider("damp","damp", v=>v.toFixed(3).slice(1));
+  slider("persist","persist", v=>v.toFixed(2).slice(1));
+  slider("psize","pointSize", v=>v.toFixed(1));
+  document.getElementById("behavior").addEventListener("change", e => {
+    params.behavior = parseInt(e.target.value, 10);
+    if (params.behavior === 4) { solarAuto = true; tour.idx = -1; tour.t = 0; }   // restart the tour
+  });
+  document.getElementById("palette").addEventListener("change", e => params.palette = parseInt(e.target.value,10));
+  document.getElementById("count").addEventListener("change", e => initState(parseInt(e.target.value,10)));
+
+  const modeBtn = document.getElementById("mode");
+  modeBtn.textContent = params.mode > 0 ? "Push" : "Pull";
+  modeBtn.addEventListener("click", () => { params.mode *= -1; modeBtn.textContent = params.mode > 0 ? "Push" : "Pull"; });
+  document.getElementById("reset").addEventListener("click", () => { initState(COUNT); initScene(); });
+  const demoBtn = document.getElementById("demo");
+  demoBtn.addEventListener("click", () => { demo = !demo; demoBtn.classList.toggle("on", demo); if (!demo) mouse.active = 0; });
+
+  // ---------------- resize ----------------
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.floor(canvas.clientWidth * dpr), h = Math.floor(canvas.clientHeight * dpr);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; initScene(); }
+    ASPECT = canvas.clientWidth / canvas.clientHeight;
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------------- deep-link via URL (?b=behavior&p=palette&demo=1) ----------------
+  (function () {
+    const q = new URLSearchParams(location.search);
+    if (q.has("b")) { params.behavior = parseInt(q.get("b"), 10) || 0; document.getElementById("behavior").value = String(params.behavior); }
+    if (q.has("p")) { params.palette = parseInt(q.get("p"), 10) || 0; document.getElementById("palette").value = String(params.palette); }
+    if (q.get("demo") === "1") { demo = true; document.getElementById("demo").classList.add("on"); }
+  })();
+
+  // ---------------- init ----------------
+  resize();
+  initState(parseInt(document.getElementById("count").value, 10));
+  initScene();
+  const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
+
+  // ---------------- solar system tour camera ----------------
+  const cam = { x: 0, y: 0, zoom: 1 };
+  const tour = { idx: -1, t: 0 };          // -1 = whole-system overview, 0..7 = planet
+  let solarAuto = true;                    // false once the user grabs the camera
+  function planetPos(i, t) {
+    const p = PLANETS[i], a = p.p + p.w * t * 0.25;
+    return [Math.cos(a) * p.r, Math.sin(a) * p.r];
+  }
+  function updateCamera(dt) {
+    let tx, ty, tz;
+    if (params.behavior === 4) {
+      if (!solarAuto) return;                                     // user drives the camera
+      tour.t += dt;
+      if (tour.t > 5) { tour.t = 0; tour.idx = tour.idx >= 7 ? -1 : tour.idx + 1; }
+      if (tour.idx < 0) { tx = 0; ty = 0; tz = 0.82; }            // overview
+      else {
+        const pp = planetPos(tour.idx, time);
+        tx = pp[0]; ty = pp[1];
+        tz = (tour.idx === 4 || tour.idx === 5) ? 2.4 : 3.8;       // gas giants need less zoom
+      }
+    } else { tx = 0; ty = 0; tz = 1; }
+    const k = Math.min(1, dt * 2.2);
+    cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k; cam.zoom += (tz - cam.zoom) * k;
+  }
+
+  // mouse camera control (solar mode): drag to pan, wheel to zoom, double-click resumes the tour
+  let dragLast = null;
+  canvas.addEventListener("wheel", (e) => {
+    if (params.behavior !== 4) return;
+    e.preventDefault(); solarAuto = false;
+    cam.zoom = Math.min(14, Math.max(0.4, cam.zoom * (e.deltaY < 0 ? 1.12 : 0.892)));
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", (e) => { if (params.behavior === 4) { dragLast = [e.clientX, e.clientY]; solarAuto = false; } });
+  window.addEventListener("pointerup", () => { dragLast = null; });
+  canvas.addEventListener("pointermove", (e) => {
+    if (params.behavior !== 4 || !dragLast) return;
+    cam.x -= ((e.clientX - dragLast[0]) / canvas.clientWidth) * 2 * ASPECT / cam.zoom;
+    cam.y += ((e.clientY - dragLast[1]) / canvas.clientHeight) * 2 / cam.zoom;
+    dragLast = [e.clientX, e.clientY];
+  });
+  canvas.addEventListener("dblclick", () => { if (params.behavior === 4) { solarAuto = true; tour.idx = -1; tour.t = 0; } });
+
+  // ---------------- demo controller ----------------
+  let demoT = 0, demoPhase = 0;
+  function updateDemo(dt) {
+    demoT += dt;
+    if (demoT > 7) {
+      demoT = 0; demoPhase++;
+      params.behavior = demoPhase % 5;
+      params.palette = demoPhase % 5;
+      document.getElementById("behavior").value = String(params.behavior);
+      document.getElementById("palette").value = String(params.palette);
+      mouse.burst = 26;
+    }
+    if (params.behavior >= 3) return;     // warp / solar drive themselves
+    // virtual attractor on a Lissajous path
+    mouse.x = ASPECT * 0.65 * Math.sin(time * 0.7);
+    mouse.y = 0.6 * Math.sin(time * 1.13);
+    mouse.active = 1;
+    params.mode = (Math.floor(time * 0.2) % 2 === 0) ? -1 : 1;
+  }
+
+  // ---------------- render loop ----------------
+  const statsEl = document.getElementById("stats");
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsT = 0;
+
+  function frame(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.05) dt = 0.05;
+    time += dt;
+    if (demo) updateDemo(dt);
+    updateCamera(dt);
+
+    // ---- density pass (only needed for Cluster) ----
+    if (params.behavior === 2) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, densityFBO);
+      gl.viewport(0, 0, DENS, DENS);
+      gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(densityProg); gl.bindVertexArray(emptyVAO);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, posTex[cur]); gl.uniform1i(DU.pos, 0);
+      gl.uniform2f(DU.texRes, TEX_W, TEX_H); gl.uniform1f(DU.aspect, ASPECT);
+      gl.uniform2f(DU.camPos, 0, 0); gl.uniform1f(DU.camZoom, 1); gl.uniform1i(DU.behavior, 2);
+      gl.drawArrays(gl.POINTS, 0, COUNT);
+    }
+
+    // ---- simulation pass ----
+    const next = 1 - cur;
+    gl.useProgram(simProg); gl.bindVertexArray(quadVAO);
+    gl.viewport(0, 0, TEX_W, TEX_H);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, simFBO[next]);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, posTex[cur]); gl.uniform1i(SU.pos, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, velTex[cur]); gl.uniform1i(SU.vel, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, densityTex); gl.uniform1i(SU.density, 2);
+    gl.uniform2f(SU.mouse, mouse.x, mouse.y);
+    gl.uniform1f(SU.mouseActive, mouse.active);
+    gl.uniform1f(SU.dt, dt);
+    gl.uniform1f(SU.gravity, params.gravity);
+    gl.uniform1f(SU.force, params.force);
+    gl.uniform1f(SU.damp, params.damp);
+    gl.uniform1f(SU.mode, params.mode);
+    gl.uniform1f(SU.burst, mouse.burst);
+    gl.uniform1f(SU.aspect, ASPECT);
+    gl.uniform1i(SU.behavior, params.behavior);
+    gl.uniform1f(SU.field, params.field);
+    gl.uniform1f(SU.time, time);
+    gl.uniform1i(SU.texW, TEX_W);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    mouse.burst *= 0.8; if (mouse.burst < 0.1) mouse.burst = 0;
+    cur = next;
+
+    // ---- trail fade: copy dimmed previous scene into current scene ----
+    const sNext = 1 - sceneCur;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO[sNext]);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(fadeProg); gl.bindVertexArray(quadVAO);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneTex[sceneCur]); gl.uniform1i(FU.tex, 0);
+    gl.uniform1f(FU.fade, params.behavior === 4 ? 0.0 : params.persist);   // no smearing in solar
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // ---- render particles: solid alpha for solar planets, additive glow elsewhere ----
+    gl.enable(gl.BLEND);
+    if (params.behavior === 4) gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied over -> solid discs
+    else gl.blendFunc(gl.SRC_ALPHA, gl.ONE);                                    // additive glow
+    gl.useProgram(renderProg); gl.bindVertexArray(emptyVAO);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, posTex[cur]); gl.uniform1i(RU.pos, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, velTex[cur]); gl.uniform1i(RU.vel, 1);
+    gl.uniform2f(RU.texRes, TEX_W, TEX_H);
+    gl.uniform1f(RU.aspect, ASPECT);
+    gl.uniform1f(RU.pointSize, params.pointSize * DPR());
+    gl.uniform1i(RU.palette, params.palette);
+    gl.uniform1i(RU.behavior, params.behavior);
+    gl.uniform2f(RU.camPos, cam.x, cam.y);
+    gl.uniform1f(RU.camZoom, cam.zoom);
+    gl.drawArrays(gl.POINTS, 0, COUNT);
+
+    // ---- present scene to screen ----
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(presentProg); gl.bindVertexArray(quadVAO);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sceneTex[sNext]); gl.uniform1i(PU.tex, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    sceneCur = sNext;
+
+    // ---- solar overlays: orbit lines (world) + constellations & stars (screen) ----
+    if (params.behavior === 4) {
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      // planet orbit lines, transformed by the tour camera
+      gl.useProgram(orbitProg);
+      gl.uniform2f(OU.camPos, cam.x, cam.y); gl.uniform1f(OU.camZoom, cam.zoom); gl.uniform1f(OU.aspect, ASPECT);
+      gl.uniform1f(OU.alpha, 0.22);
+      gl.bindVertexArray(orbitVAO); gl.drawArrays(gl.LINES, 0, orbitCount);
+      // constellations + background stars, fixed to screen
+      gl.useProgram(starProg);
+      gl.uniform1f(STU.scale, 0.8);
+      gl.uniform1i(STU.round, 0); gl.uniform1f(STU.size, 1.0);
+      gl.bindVertexArray(starVAOline); gl.drawArrays(gl.LINES, 0, lineCount);
+      gl.uniform1i(STU.round, 1); gl.uniform1f(STU.size, 2.4 * DPR());
+      gl.bindVertexArray(starVAOpoint); gl.drawArrays(gl.POINTS, 0, pointCount);
+    }
+
+    // ---- stats ----
+    fpsAcc += dt; fpsN++; fpsT += dt;
+    if (fpsT >= 0.5) {
+      const names = ["Swirl","Flow","Cluster","Warp","Solar"];
+      statsEl.textContent = `${(COUNT/1000).toFixed(0)}K · ${(fpsN/fpsAcc).toFixed(0)} fps · ${names[params.behavior]}${demo ? " · DEMO" : ""}`;
+      fpsAcc = 0; fpsN = 0; fpsT = 0;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
+<script type="text/html" id="src-fluid">
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebGL Fluid Simulation</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; touch-action: none; }
+  #ui {
+    position: fixed; top: 12px; left: 12px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #cdd6f4; background: rgba(10,12,20,.5); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 12px 14px;
+    width: 226px; user-select: none;
+  }
+  #ui h1 { font-size: 13px; font-weight: 600; letter-spacing: .03em; margin-bottom: 8px; color: #89b4fa; }
+  #ui .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; }
+  #ui label { opacity: .8; }
+  #ui input[type=range] { width: 108px; accent-color: #89b4fa; }
+  #ui .val { width: 40px; text-align: right; color: #a6e3a1; }
+  #ui .btnrow { display:flex; gap:6px; margin-top:10px; }
+  #ui button { flex:1; cursor:pointer; font:11px ui-monospace,monospace; color:#cdd6f4;
+    background:rgba(137,180,250,.12); border:1px solid rgba(137,180,250,.3); border-radius:6px; padding:5px 0; }
+  #ui button:hover { background:rgba(137,180,250,.25); }
+  #ui .hint { margin-top: 10px; opacity: .55; font-size: 11px; }
+  #ui a { color:#89b4fa; }
+  #stats { position: fixed; bottom: 12px; left: 12px; font: 12px ui-monospace, monospace; color: #6c7086; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="ui">
+  <h1>≈ FLUID SIM</h1>
+  <div class="row"><label>Force</label><input id="force" type="range" min="1000" max="12000" step="100" value="6000"><span class="val" id="forceV">6000</span></div>
+  <div class="row"><label>Vorticity</label><input id="curl" type="range" min="0" max="50" step="1" value="28"><span class="val" id="curlV">28</span></div>
+  <div class="row"><label>Fade</label><input id="dyeDiss" type="range" min="0.95" max="1.0" step="0.001" value="0.985"><span class="val" id="dyeDissV">.985</span></div>
+  <div class="row"><label>Splat</label><input id="radius" type="range" min="0.1" max="1.0" step="0.05" value="0.35"><span class="val" id="radiusV">.35</span></div>
+  <div class="btnrow"><button id="demo">Demo</button><button id="clear">Clear</button></div>
+  <div class="hint">Drag to push the fluid & inject ink.<br><a href="javascript:void(0)">→ particle sim</a></div>
+</div>
+<div id="stats">—</div>
+
+<script type="text/javascript">
+"use strict";
+window.addEventListener("error", (e) => {
+  const d = document.createElement("pre");
+  d.style.cssText = "position:fixed;right:12px;top:12px;max-width:46vw;max-height:90vh;overflow:auto;z-index:99;color:#f38ba8;background:rgba(20,10,14,.92);border:1px solid #f38ba8;border-radius:8px;padding:12px;font:11px ui-monospace,monospace;white-space:pre-wrap";
+  d.textContent = "⚠ " + (e.error && e.error.stack ? e.error.stack : e.message);
+  document.body.appendChild(d);
+});
+(function () {
+  const canvas = document.getElementById("gl");
+  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false });
+  const fail = (m) => { document.body.innerHTML = "<p style='color:#f38ba8;font:16px monospace;padding:40px'>" + m + "</p>"; };
+  if (!gl) { fail("WebGL2를 지원하지 않는 브라우저입니다."); return; }
+  if (!gl.getExtension("EXT_color_buffer_float")) { fail("EXT_color_buffer_float 미지원: float 텍스처 렌더 불가."); return; }
+
+  // ---------------- shader helpers ----------------
+  function compile(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + "\n" + src);
+    return s;
+  }
+  function program(fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, baseVS));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    // collect uniforms
+    const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+    return { p, u };
+  }
+
+  const baseVS = `#version 300 es
+  precision highp float;
+  layout(location = 0) in vec2 a_pos; out vec2 v_uv;
+  void main(){ v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+
+  // ---------------- fragment shaders (Stable Fluids) ----------------
+  const splatFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_target;
+  uniform vec3 u_color; uniform vec2 u_point; uniform float u_radius, u_aspect;
+  out vec4 frag;
+  void main(){
+    vec2 p = v_uv - u_point; p.x *= u_aspect;
+    vec3 splat = exp(-dot(p, p) / u_radius) * u_color;
+    frag = vec4(texture(u_target, v_uv).xyz + splat, 1.0);
+  }`;
+
+  const advectFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_velocity, u_source;
+  uniform vec2 u_texelSize; uniform float u_dt, u_dissipation;
+  out vec4 frag;
+  void main(){
+    vec2 coord = v_uv - u_dt * texture(u_velocity, v_uv).xy * u_texelSize;
+    frag = u_dissipation * texture(u_source, coord);
+  }`;
+
+  const divergenceFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_velocity; uniform vec2 u_texelSize;
+  out vec4 frag;
+  void main(){
+    float l = texture(u_velocity, v_uv - vec2(u_texelSize.x, 0.0)).x;
+    float r = texture(u_velocity, v_uv + vec2(u_texelSize.x, 0.0)).x;
+    float b = texture(u_velocity, v_uv - vec2(0.0, u_texelSize.y)).y;
+    float t = texture(u_velocity, v_uv + vec2(0.0, u_texelSize.y)).y;
+    frag = vec4(0.5 * ((r - l) + (t - b)), 0.0, 0.0, 1.0);
+  }`;
+
+  const curlFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_velocity; uniform vec2 u_texelSize;
+  out vec4 frag;
+  void main(){
+    float l = texture(u_velocity, v_uv - vec2(u_texelSize.x, 0.0)).y;
+    float r = texture(u_velocity, v_uv + vec2(u_texelSize.x, 0.0)).y;
+    float b = texture(u_velocity, v_uv - vec2(0.0, u_texelSize.y)).x;
+    float t = texture(u_velocity, v_uv + vec2(0.0, u_texelSize.y)).x;
+    frag = vec4(0.5 * ((r - l) - (t - b)), 0.0, 0.0, 1.0);
+  }`;
+
+  const vorticityFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_velocity, u_curl;
+  uniform vec2 u_texelSize; uniform float u_curlStrength, u_dt;
+  out vec4 frag;
+  void main(){
+    float l = texture(u_curl, v_uv - vec2(u_texelSize.x, 0.0)).x;
+    float r = texture(u_curl, v_uv + vec2(u_texelSize.x, 0.0)).x;
+    float b = texture(u_curl, v_uv - vec2(0.0, u_texelSize.y)).x;
+    float t = texture(u_curl, v_uv + vec2(0.0, u_texelSize.y)).x;
+    float c = texture(u_curl, v_uv).x;
+    vec2 force = 0.5 * vec2(abs(t) - abs(b), abs(l) - abs(r));
+    force /= length(force) + 1e-4;
+    force *= u_curlStrength * c;
+    force.y *= -1.0;
+    vec2 vel = texture(u_velocity, v_uv).xy + force * u_dt;
+    frag = vec4(clamp(vel, -1000.0, 1000.0), 0.0, 1.0);
+  }`;
+
+  const pressureFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_pressure, u_divergence; uniform vec2 u_texelSize;
+  out vec4 frag;
+  void main(){
+    float l = texture(u_pressure, v_uv - vec2(u_texelSize.x, 0.0)).x;
+    float r = texture(u_pressure, v_uv + vec2(u_texelSize.x, 0.0)).x;
+    float b = texture(u_pressure, v_uv - vec2(0.0, u_texelSize.y)).x;
+    float t = texture(u_pressure, v_uv + vec2(0.0, u_texelSize.y)).x;
+    float div = texture(u_divergence, v_uv).x;
+    frag = vec4((l + r + b + t - div) * 0.25, 0.0, 0.0, 1.0);
+  }`;
+
+  const gradientFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_pressure, u_velocity; uniform vec2 u_texelSize;
+  out vec4 frag;
+  void main(){
+    float l = texture(u_pressure, v_uv - vec2(u_texelSize.x, 0.0)).x;
+    float r = texture(u_pressure, v_uv + vec2(u_texelSize.x, 0.0)).x;
+    float b = texture(u_pressure, v_uv - vec2(0.0, u_texelSize.y)).x;
+    float t = texture(u_pressure, v_uv + vec2(0.0, u_texelSize.y)).x;
+    vec2 vel = texture(u_velocity, v_uv).xy - 0.5 * vec2(r - l, t - b);
+    frag = vec4(vel, 0.0, 1.0);
+  }`;
+
+  const clearFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_texture; uniform float u_value;
+  out vec4 frag;
+  void main(){ frag = u_value * texture(u_texture, v_uv); }`;
+
+  const displayFS = `#version 300 es
+  precision highp float;
+  in vec2 v_uv; uniform sampler2D u_dye;
+  out vec4 frag;
+  void main(){
+    vec3 c = texture(u_dye, v_uv).rgb;
+    // gentle tonemap so bright ink glows without harsh clipping
+    c = c / (c + vec3(0.6)) * 1.6;
+    frag = vec4(c, 1.0);
+  }`;
+
+  const splatProg = program(splatFS);
+  const advectProg = program(advectFS);
+  const divergenceProg = program(divergenceFS);
+  const curlProg = program(curlFS);
+  const vorticityProg = program(vorticityFS);
+  const pressureProg = program(pressureFS);
+  const gradientProg = program(gradientFS);
+  const clearProg = program(clearFS);
+  const displayProg = program(displayFS);
+
+  // ---------------- fullscreen triangle ----------------
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  // a_pos is location 0 in all programs (single attribute) -> enable on this VAO
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);   // a_pos pinned to location 0 in baseVS
+  // only one VAO in this app — leave it bound for every draw/blit
+
+  // ---------------- framebuffers ----------------
+  const RES = 256;            // simulation grid (square)
+  const TEXEL = 1 / RES;
+  function makeFBO(filter) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, RES, RES, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.viewport(0, 0, RES, RES); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    return { tex, fbo };
+  }
+  function makeDouble(filter) {
+    let a = makeFBO(filter), b = makeFBO(filter);
+    return { get read() { return a; }, get write() { return b; }, swap() { const t = a; a = b; b = t; } };
+  }
+  let velocity = makeDouble(gl.LINEAR);
+  let dye = makeDouble(gl.LINEAR);
+  let pressure = makeDouble(gl.NEAREST);
+  let divergence = makeFBO(gl.NEAREST);
+  let curl = makeFBO(gl.NEAREST);
+
+  // ---------------- blit ----------------
+  function blit(target) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : null);
+    gl.viewport(0, 0, target ? RES : canvas.width, target ? RES : canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  function bindTex(tex, unit) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); return unit; }
+
+  // ---------------- params + interaction ----------------
+  const params = { force: 6000, curl: 28, dyeDiss: 0.985, radius: 0.35, pressureIter: 22, velDiss: 0.998 };
+  let demo = true, colorT = 0;
+  const pointer = { x: 0.5, y: 0.5, dx: 0, dy: 0, down: false, moved: false };
+
+  function hsv(h, s, v) {            // h in [0,1], robust to NaN / out-of-range
+    if (!isFinite(h)) h = 0;
+    h = (h % 1 + 1) % 1;
+    const x6 = h * 6, i = Math.floor(x6), f = x6 - i;
+    const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    const tbl = [[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]];
+    return tbl[i % 6] || tbl[0];
+  }
+
+  function setPointer(e) {
+    const nx = e.clientX / canvas.clientWidth;
+    const ny = 1 - e.clientY / canvas.clientHeight;
+    pointer.dx = nx - pointer.x; pointer.dy = ny - pointer.y;
+    pointer.x = nx; pointer.y = ny; pointer.moved = true;
+  }
+  canvas.addEventListener("pointerdown", (e) => { pointer.down = true; pointer.x = e.clientX / canvas.clientWidth; pointer.y = 1 - e.clientY / canvas.clientHeight; pointer.dx = pointer.dy = 0; });
+  canvas.addEventListener("pointermove", (e) => { if (pointer.down || true) setPointer(e); });
+  window.addEventListener("pointerup", () => { pointer.down = false; });
+
+  // ---------------- UI ----------------
+  function slider(id, key, fmt) {
+    const el = document.getElementById(id), out = document.getElementById(id + "V");
+    const upd = () => { params[key] = parseFloat(el.value); out.textContent = fmt(params[key]); };
+    el.addEventListener("input", upd); upd();
+  }
+  slider("force", "force", v => String(Math.round(v)));
+  slider("curl", "curl", v => String(Math.round(v)));
+  slider("dyeDiss", "dyeDiss", v => v.toFixed(3).slice(1));
+  slider("radius", "radius", v => v.toFixed(2).slice(1));
+  const demoBtn = document.getElementById("demo");
+  demoBtn.style.background = demo ? "rgba(166,227,161,.22)" : "";
+  demoBtn.addEventListener("click", () => { demo = !demo; demoBtn.style.background = demo ? "rgba(166,227,161,.22)" : ""; });
+  document.getElementById("clear").addEventListener("click", clearAll);
+
+  function clearAll() {
+    gl.useProgram(clearProg.p);
+    gl.uniform1f(clearProg.u.u_value, 0);
+    gl.uniform1i(clearProg.u.u_texture, bindTex(dye.read.tex, 0)); blit(dye.write); dye.swap();
+    gl.uniform1i(clearProg.u.u_texture, bindTex(velocity.read.tex, 0)); blit(velocity.write); velocity.swap();
+  }
+
+  // ---------------- splats ----------------
+  function splat(x, y, dx, dy, color) {
+    const aspect = canvas.width / canvas.height;
+    const radius = params.radius * 0.0006 + 0.00002;
+    // velocity
+    gl.useProgram(splatProg.p);
+    gl.uniform1f(splatProg.u.u_aspect, aspect);
+    gl.uniform2f(splatProg.u.u_point, x, y);
+    gl.uniform1f(splatProg.u.u_radius, radius);
+    gl.uniform1i(splatProg.u.u_target, bindTex(velocity.read.tex, 0));
+    gl.uniform3f(splatProg.u.u_color, dx, dy, 0);
+    blit(velocity.write); velocity.swap();
+    // dye
+    gl.uniform1i(splatProg.u.u_target, bindTex(dye.read.tex, 0));
+    gl.uniform3f(splatProg.u.u_color, color[0], color[1], color[2]);
+    blit(dye.write); dye.swap();
+  }
+
+  // ---------------- resize ----------------
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(canvas.clientWidth * dpr);
+    canvas.height = Math.floor(canvas.clientHeight * dpr);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // seed a few colored splats so it's alive on load
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2;
+    splat(0.5 + Math.cos(a) * 0.18, 0.5 + Math.sin(a) * 0.18, Math.cos(a) * 1200, Math.sin(a) * 1200, hsv(i / 5, 0.8, 0.9));
+  }
+
+  // ---------------- simulation step ----------------
+  function step(dt) {
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(vao);
+
+    // inject from pointer
+    if (pointer.moved && (Math.abs(pointer.dx) > 1e-5 || Math.abs(pointer.dy) > 1e-5)) {
+      colorT += 0.004;
+      splat(pointer.x, pointer.y, pointer.dx * params.force, pointer.dy * params.force, hsv(colorT % 1, 0.85, 0.95));
+      pointer.moved = false;
+    }
+    // demo: roving auto-splats
+    if (demo) {
+      colorT += dt * 0.15;
+      const t = colorT * 6.28;
+      const x = 0.5 + 0.32 * Math.sin(t * 0.7), y = 0.5 + 0.28 * Math.sin(t * 1.13);
+      splat(x, y, Math.cos(t * 1.7) * 2600, Math.sin(t * 1.9) * 2600, hsv(colorT % 1, 0.8, 0.95));
+    }
+
+    // advect velocity
+    gl.useProgram(advectProg.p);
+    gl.uniform2f(advectProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1f(advectProg.u.u_dt, dt);
+    gl.uniform1f(advectProg.u.u_dissipation, params.velDiss);
+    gl.uniform1i(advectProg.u.u_velocity, bindTex(velocity.read.tex, 0));
+    gl.uniform1i(advectProg.u.u_source, bindTex(velocity.read.tex, 0));
+    blit(velocity.write); velocity.swap();
+
+    // curl + vorticity confinement
+    gl.useProgram(curlProg.p);
+    gl.uniform2f(curlProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1i(curlProg.u.u_velocity, bindTex(velocity.read.tex, 0));
+    blit(curl);
+    gl.useProgram(vorticityProg.p);
+    gl.uniform2f(vorticityProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1f(vorticityProg.u.u_curlStrength, params.curl);
+    gl.uniform1f(vorticityProg.u.u_dt, dt);
+    gl.uniform1i(vorticityProg.u.u_velocity, bindTex(velocity.read.tex, 0));
+    gl.uniform1i(vorticityProg.u.u_curl, bindTex(curl.tex, 1));
+    blit(velocity.write); velocity.swap();
+
+    // divergence
+    gl.useProgram(divergenceProg.p);
+    gl.uniform2f(divergenceProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1i(divergenceProg.u.u_velocity, bindTex(velocity.read.tex, 0));
+    blit(divergence);
+
+    // pressure: decay then Jacobi iterations
+    gl.useProgram(clearProg.p);
+    gl.uniform1f(clearProg.u.u_value, 0.8);
+    gl.uniform1i(clearProg.u.u_texture, bindTex(pressure.read.tex, 0));
+    blit(pressure.write); pressure.swap();
+    gl.useProgram(pressureProg.p);
+    gl.uniform2f(pressureProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1i(pressureProg.u.u_divergence, bindTex(divergence.tex, 1));
+    for (let i = 0; i < params.pressureIter; i++) {
+      gl.uniform1i(pressureProg.u.u_pressure, bindTex(pressure.read.tex, 0));
+      blit(pressure.write); pressure.swap();
+    }
+
+    // subtract pressure gradient -> incompressible velocity
+    gl.useProgram(gradientProg.p);
+    gl.uniform2f(gradientProg.u.u_texelSize, TEXEL, TEXEL);
+    gl.uniform1i(gradientProg.u.u_pressure, bindTex(pressure.read.tex, 0));
+    gl.uniform1i(gradientProg.u.u_velocity, bindTex(velocity.read.tex, 1));
+    blit(velocity.write); velocity.swap();
+
+    // advect dye
+    gl.useProgram(advectProg.p);
+    gl.uniform1f(advectProg.u.u_dissipation, params.dyeDiss);
+    gl.uniform1i(advectProg.u.u_velocity, bindTex(velocity.read.tex, 0));
+    gl.uniform1i(advectProg.u.u_source, bindTex(dye.read.tex, 1));
+    blit(dye.write); dye.swap();
+  }
+
+  // ---------------- render loop ----------------
+  const statsEl = document.getElementById("stats");
+  let last = performance.now(), fpsAcc = 0, fpsN = 0, fpsT = 0;
+  function frame(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.033) dt = 0.033;
+    step(dt);
+
+    // display dye to screen
+    gl.useProgram(displayProg.p);
+    gl.bindVertexArray(vao);
+    gl.uniform1i(displayProg.u.u_dye, bindTex(dye.read.tex, 0));
+    blit(null);
+
+    fpsAcc += dt; fpsN++; fpsT += dt;
+    if (fpsT >= 0.5) { statsEl.textContent = `${RES}² grid · ${(fpsN/fpsAcc).toFixed(0)} fps · ${params.pressureIter} pressure iters${demo ? " · DEMO" : ""}`; fpsAcc = 0; fpsN = 0; fpsT = 0; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
+<script type="text/html" id="src-voyager">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VOYAGER 1 · DEEP SPACE NETWORK</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #02060b; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #bar {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: #74e8a0;
+    background: rgba(4,12,10,.72); border: 1px solid rgba(116,232,160,.28);
+    border-radius: 8px; padding: 8px 12px; backdrop-filter: blur(6px); user-select: none;
+    box-shadow: 0 0 24px rgba(0,0,0,.6);
+  }
+  #bar button { cursor: pointer; font: 12px ui-monospace, monospace; color: #a7f3c9;
+    background: rgba(116,232,160,.10); border: 1px solid rgba(116,232,160,.35); border-radius: 5px; padding: 4px 10px; }
+  #bar button:hover { background: rgba(116,232,160,.22); }
+  #bar button.on { background: rgba(255,179,71,.18); border-color: rgba(255,179,71,.5); color: #ffcf8a; }
+  #bar input[type=range] { width: 280px; accent-color: #74e8a0; }
+  #bar a { color: #74e8a0; text-decoration: none; opacity: .7; } #bar a:hover { opacity: 1; }
+  #scrubDate { width: 90px; color: #ffcf8a; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">
+  <button id="play">❚❚ PAUSE</button>
+  <span>RATE</span>
+  <button class="rate" data-r="0.5">0.5×</button>
+  <button class="rate on" data-r="2">2×</button>
+  <button class="rate" data-r="8">8×</button>
+  <input id="scrub" type="range" min="1977.68" max="2035" step="0.01" value="1977.68">
+  <span id="scrubDate">1977-09-05</span>
+  <a href="javascript:void(0)">▸ orrery</a>
+</div>
+
+<script type="text/javascript">
+"use strict";
+(function () {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  let DPR = 1, W = 0, H = 0;
+  const PI = Math.PI;
+
+  // ---------------- mission model ----------------
+  const WP = [
+    { y: 1977.68, au: 1.0, ang: 0 }, { y: 1979.18, au: 5.2, ang: 40 }, { y: 1980.87, au: 9.5, ang: 76 },
+    { y: 1990.12, au: 40.5, ang: 120 }, { y: 2004.96, au: 94.0, ang: 150 }, { y: 2012.65, au: 121.0, ang: 164 },
+    { y: 2026.45, au: 167.0, ang: 172 }, { y: 2035.0, au: 185.0, ang: 175 },
+  ];
+  const EVENTS = [
+    { y: 1977.68, t: "LAUNCH — Titan IIIE/Centaur, Cape Canaveral LC-41" },
+    { y: 1979.18, t: "JUPITER CLOSEST APPROACH 349,000 km — gravity assist Δv +16 km/s", a: 1 },
+    { y: 1980.87, t: "SATURN CLOSEST APPROACH 124,000 km — deflected +35.5° N of ecliptic", a: 1 },
+    { y: 1990.12, t: "FAMILY PORTRAIT — 'Pale Blue Dot' imaged from 40.5 AU" },
+    { y: 1998.13, t: "SURPASSES PIONEER 10 — most distant human-made object" },
+    { y: 2004.96, t: "TERMINATION SHOCK @ 94 AU — solar wind drops subsonic", a: 1 },
+    { y: 2012.65, t: "HELIOPAUSE CROSSING @ 121 AU — ENTERING INTERSTELLAR MEDIUM", a: 2 },
+    { y: 2017.0, t: "TRAJECTORY CORRECTION THRUSTERS fired after 37 yr dormant" },
+    { y: 2025.0, t: "NOMINAL — 3 instruments active on RTG decline" },
+  ];
+  const AU_KM = 1.495978707e8, AU_LT = 499.005, AUYR_KMS = 4.74057;
+  const lerp = (a, b, t) => a + (b - a) * t, smooth = (t) => t * t * (3 - 2 * t);
+
+  function stateAt(y) {
+    if (y <= WP[0].y) return { au: WP[0].au, ang: WP[0].ang };
+    if (y >= WP[WP.length - 1].y) return { au: WP[WP.length - 1].au, ang: WP[WP.length - 1].ang };
+    for (let i = 0; i < WP.length - 1; i++) if (y >= WP[i].y && y <= WP[i + 1].y) { const t = smooth((y - WP[i].y) / (WP[i + 1].y - WP[i].y)); return { au: lerp(WP[i].au, WP[i + 1].au, t), ang: lerp(WP[i].ang, WP[i + 1].ang, t) }; }
+    return { au: WP[0].au, ang: WP[0].ang };
+  }
+  function segRate(y) { for (let i = 0; i < WP.length - 1; i++) if (y >= WP[i].y && y <= WP[i + 1].y) return (WP[i + 1].au - WP[i].au) / (WP[i + 1].y - WP[i].y); const n = WP.length - 1; return (WP[n].au - WP[n - 1].au) / (WP[n].y - WP[n - 1].y); }
+  function phaseOf(y) { if (y < 1979.18) return "INNER CRUISE"; if (y < 1980.87) return "JOVIAN ENCOUNTER"; if (y < 2004.96) return "OUTER HELIOSPHERE CRUISE"; if (y < 2012.65) return "HELIOSHEATH TRANSIT"; return "INTERSTELLAR SPACE"; }
+  function yToDate(y) { const Y = Math.floor(y), doy = Math.floor((y - Y) * 365.25), d = new Date(Y, 0, 1 + doy); return { Y: d.getFullYear(), M: d.getMonth() + 1, D: d.getDate() }; }
+  function fmtDate(y) { const d = yToDate(y); return `${d.Y}-${String(d.M).padStart(2,"0")}-${String(d.D).padStart(2,"0")}`; }
+
+  // ---------------- top-down view: Sun at centre, sqrt(AU) radial scale ----------------
+  const RMAX = Math.sqrt(190);
+  let cx = 0, cy = 0, plotR = 0;
+  function rOf(au) { return Math.sqrt(Math.max(au, 0.0001)) / RMAX * plotR; }
+  function posOf(au, angDeg) { const a = (angDeg - 90) * PI / 180; return [cx + Math.cos(a) * rOf(au), cy + Math.sin(a) * rOf(au)]; }
+
+  const STARS = [];
+  function seedStars() { STARS.length = 0; for (let i = 0; i < 240; i++) STARS.push([Math.random(), Math.random(), 0.2 + Math.random() * 0.8]); }
+
+  // ---------------- state ----------------
+  let simYear = 1977.68, playing = true, rate = 2, last = performance.now(), flash = 0, crossedHP = false;
+  (function () { const q = new URLSearchParams(location.search); if (q.has("y")) simYear = Math.max(1977.68, Math.min(2035, parseFloat(q.get("y")) || 1977.68)); })();
+  const scrub = document.getElementById("scrub"), scrubDate = document.getElementById("scrubDate"), playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", () => { playing = !playing; playBtn.textContent = playing ? "❚❚ PAUSE" : "▶ PLAY"; playBtn.classList.toggle("on", !playing); });
+  document.querySelectorAll(".rate").forEach(b => b.addEventListener("click", () => { rate = parseFloat(b.dataset.r); document.querySelectorAll(".rate").forEach(x => x.classList.remove("on")); b.classList.add("on"); }));
+  scrub.addEventListener("input", () => { simYear = parseFloat(scrub.value); playing = false; playBtn.textContent = "▶ PLAY"; playBtn.classList.add("on"); crossedHP = simYear >= 2012.65; });
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR); canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    cx = W * 0.5 + 60; cy = H * 0.5; plotR = Math.min(W, H) * 0.40;
+    seedStars();
+  }
+  window.addEventListener("resize", resize); resize();
+
+  // ---------------- drawing ----------------
+  const GREEN = "#74e8a0", AMBER = "#ffb347";
+  const mono = (px) => `${px}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+
+  function drawStars() { for (const s of STARS) { ctx.globalAlpha = s[2] * 0.5; ctx.fillStyle = "#cfe8ff"; ctx.fillRect(s[0] * W, s[1] * H, 1.2, 1.2); } ctx.globalAlpha = 1; }
+  function dashedCircle(r, color, dash) { ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash || []); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * PI); ctx.stroke(); ctx.setLineDash([]); }
+
+  function drawField() {
+    ctx.font = mono(9); ctx.textAlign = "left";
+    for (const au of [50, 100, 150]) {
+      dashedCircle(rOf(au), "rgba(116,232,160,0.12)", [2, 5]);
+      ctx.fillStyle = "rgba(116,232,160,0.35)"; ctx.fillText(au + " AU", cx + rOf(au) * 0.7071 + 2, cy - rOf(au) * 0.7071);
+    }
+    for (const au of [1, 5.2, 9.5]) dashedCircle(rOf(au), "rgba(120,170,255,0.30)");
+    dashedCircle(rOf(94), "rgba(255,179,71,0.35)", [4, 4]);
+    dashedCircle(rOf(121), "rgba(120,190,255,0.55)", [8, 4]);
+    ctx.fillStyle = "rgba(255,179,71,0.7)"; ctx.fillText("TERMINATION SHOCK", cx - 56, cy - rOf(94) - 4);
+    ctx.fillStyle = "rgba(150,200,255,0.9)"; ctx.fillText("HELIOPAUSE", cx - 34, cy - rOf(121) - 5);
+    ctx.fillStyle = "rgba(150,200,255,0.4)"; ctx.fillText("· INTERSTELLAR MEDIUM ·", cx - 70, cy - rOf(121) - 18);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 16);
+    g.addColorStop(0, "#fff7e0"); g.addColorStop(0.4, "#ffd86b"); g.addColorStop(1, "rgba(255,160,40,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, 16, 0, 2 * PI); ctx.fill();
+    ctx.fillStyle = "rgba(255,216,107,0.7)"; ctx.textAlign = "center"; ctx.fillText("☉ SUN", cx, cy + 26); ctx.textAlign = "left";
+  }
+  function drawTrajectory() {
+    ctx.lineWidth = 1.6; ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(116,232,160,0.18)"; ctx.setLineDash([3, 4]); ctx.beginPath(); let st = false;
+    for (let y = 1977.68; y <= 2035; y += 0.04) { const s = stateAt(y); const [px, py] = posOf(s.au, s.ang); st ? ctx.lineTo(px, py) : ctx.moveTo(px, py); st = true; }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = GREEN; ctx.lineWidth = 1.8; ctx.beginPath(); st = false;
+    for (let y = 1977.68; y <= simYear; y += 0.02) { const s = stateAt(y); const [px, py] = posOf(s.au, s.ang); st ? ctx.lineTo(px, py) : ctx.moveTo(px, py); st = true; }
+    ctx.stroke();
+    ctx.font = mono(9); ctx.textAlign = "center";
+    for (const w of [WP[1], WP[2]]) {
+      const [px, py] = posOf(w.au, w.ang);
+      ctx.strokeStyle = AMBER; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, 6, 0, 2 * PI); ctx.stroke();
+      if (simYear >= w.y) { ctx.fillStyle = "rgba(255,179,71,0.85)"; ctx.fillText("SWING-BY", px, py - 10); }
+    }
+    ctx.textAlign = "left";
+  }
+  function drawBeam() {
+    const [ex, ey] = posOf(1, (simYear * 220) % 360);
+    const s = stateAt(simYear), [px, py] = posOf(s.au, s.ang);
+    ctx.strokeStyle = "rgba(120,190,255,0.12)"; ctx.lineWidth = 1; ctx.setLineDash([1, 6]);
+    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(px, py); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#7fb0ff"; ctx.beginPath(); ctx.arc(ex, ey, 2.2, 0, 2 * PI); ctx.fill();
+  }
+  function drawCraft() {
+    const s = stateAt(simYear), [px, py] = posOf(s.au, s.ang);
+    const blink = 0.55 + 0.45 * Math.sin(performance.now() / 240);
+    ctx.strokeStyle = `rgba(255,179,71,${blink})`; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.moveTo(px - 11, py); ctx.lineTo(px - 4, py); ctx.moveTo(px + 4, py); ctx.lineTo(px + 11, py);
+    ctx.moveTo(px, py - 11); ctx.lineTo(px, py - 4); ctx.moveTo(px, py + 4); ctx.lineTo(px, py + 11); ctx.stroke();
+    ctx.fillStyle = AMBER; ctx.beginPath(); ctx.arc(px, py, 2.4, 0, 2 * PI); ctx.fill();
+    ctx.font = mono(10); ctx.fillStyle = "#ffcf8a"; ctx.textAlign = "left";
+    ctx.fillText("VGR-1  " + s.au.toFixed(1) + " AU", px + 14, py + 3);
+  }
+
+  // ---------------- HUD ----------------
+  function panel(x, y, w, h) {
+    ctx.fillStyle = "rgba(4,14,11,0.66)"; ctx.strokeStyle = "rgba(116,232,160,0.25)"; ctx.lineWidth = 1;
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = GREEN; const c = 8;
+    [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([px,py,sx,sy]) => { ctx.beginPath(); ctx.moveTo(px, py + sy*c); ctx.lineTo(px, py); ctx.lineTo(px + sx*c, py); ctx.stroke(); });
+  }
+  function drawHeader() {
+    panel(16, 14, 360, 34); ctx.fillStyle = GREEN; ctx.font = mono(13); ctx.textAlign = "left";
+    ctx.fillText("VOYAGER 1 · DEEP SPACE NETWORK", 28, 36);
+    const rec = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    ctx.fillStyle = `rgba(255,80,80,${rec})`; ctx.beginPath(); ctx.arc(352, 31, 4, 0, 2 * PI); ctx.fill();
+    ctx.fillStyle = "rgba(255,120,120,0.8)"; ctx.font = mono(9); ctx.fillText("LIVE", 340, 44);
+  }
+  function row(x, y, k, v, vc) { ctx.fillStyle = "rgba(116,232,160,0.55)"; ctx.font = mono(10); ctx.fillText(k, x, y); ctx.fillStyle = vc || "#cdeede"; ctx.font = mono(12); ctx.fillText(v, x, y + 15); }
+  function drawTelemetry() {
+    const px = W - 290, py = 14, pw = 274, ph = 252; panel(px, py, pw, ph);
+    ctx.fillStyle = GREEN; ctx.font = mono(11); ctx.textAlign = "left"; ctx.fillText("▣ SPACECRAFT TELEMETRY", px + 14, py + 22);
+    ctx.strokeStyle = "rgba(116,232,160,0.2)"; ctx.beginPath(); ctx.moveTo(px+14, py+30); ctx.lineTo(px+pw-14, py+30); ctx.stroke();
+    const s = stateAt(simYear), kms = segRate(simYear) * AUYR_KMS, ltSec = s.au * AU_LT;
+    const ltH = Math.floor(ltSec / 3600), ltM = Math.floor((ltSec % 3600) / 60);
+    const metY = simYear - 1977.68, metYi = Math.floor(metY), metD = Math.floor((metY - metYi) * 365.25);
+    const interstellar = simYear >= 2012.65; let X = px + 14, Y = py + 52;
+    row(X, Y, "EARTH DATE", fmtDate(simYear), "#ffcf8a"); row(X + 138, Y, "MISSION ELAPSED", `${metYi}y ${metD}d`); Y += 40;
+    row(X, Y, "HELIOCENTRIC DIST", s.au.toFixed(2) + " AU"); row(X + 138, Y, "", (s.au * AU_KM).toExponential(3) + " km"); Y += 40;
+    row(X, Y, "VELOCITY (SUN)", kms.toFixed(2) + " km/s"); row(X + 138, Y, "1-WAY LIGHT TIME", `${ltH}h ${String(ltM).padStart(2,"0")}m`); Y += 40;
+    row(X, Y, "MISSION PHASE", phaseOf(simYear), interstellar ? "#9fd0ff" : "#cdeede"); row(X + 138, Y, "DSN STATION", "DSS-43 CBR"); Y += 40;
+    ctx.fillStyle = "rgba(116,232,160,0.55)"; ctx.font = mono(10); ctx.fillText("DOWNLINK", X, Y);
+    const bars = Math.max(1, Math.round(6 - s.au / 35));
+    for (let i = 0; i < 8; i++) { ctx.fillStyle = i < bars ? GREEN : "rgba(116,232,160,0.18)"; ctx.fillRect(X + 70 + i * 9, Y - 8, 6, 10); }
+    ctx.fillStyle = "rgba(116,232,160,0.7)"; ctx.font = mono(9); ctx.fillText("160 bps · X-BAND", X + 150, Y);
+  }
+  function drawLog() {
+    const px = 16, ph = 150, py = H - ph - 56, pw = 470; panel(px, py, pw, ph);
+    ctx.fillStyle = GREEN; ctx.font = mono(11); ctx.fillText("▣ EVENT LOG", px + 14, py + 20);
+    const shown = EVENTS.filter(e => e.y <= simYear).slice(-6); let y = py + 40;
+    for (const e of shown) {
+      const col = e.a === 2 ? "#9fd0ff" : e.a === 1 ? "#ffcf8a" : "rgba(160,230,190,0.85)";
+      ctx.fillStyle = "rgba(116,232,160,0.5)"; ctx.font = mono(9); ctx.fillText("[" + fmtDate(e.y) + "]", px + 14, y);
+      ctx.fillStyle = col; ctx.font = mono(10);
+      const words = e.t.split(" "); let line = "", lx = px + 96;
+      for (const w of words) { if ((line + w).length > 44) { ctx.fillText(line, lx, y); y += 13; line = ""; } line += w + " "; }
+      ctx.fillText(line, lx, y); y += 17;
+    }
+    if (Math.sin(performance.now() / 300) > 0) { ctx.fillStyle = GREEN; ctx.fillRect(px + 14, y - 8, 7, 10); }
+  }
+  function drawScanlines() {
+    ctx.fillStyle = "rgba(0,0,0,0.10)"; for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    const g = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.55)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+
+  // ---------------- loop ----------------
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05); last = now;
+    if (playing) { simYear += dt * rate; if (simYear >= 2035) { simYear = 2035; playing = false; playBtn.textContent = "▶ PLAY"; } scrub.value = simYear; }
+    scrubDate.textContent = fmtDate(simYear);
+    if (!crossedHP && simYear >= 2012.65) { crossedHP = true; flash = 1; } if (simYear < 2012.65) crossedHP = false;
+    flash = Math.max(0, flash - dt * 0.7);
+
+    const s = stateAt(simYear), interstellar = simYear >= 2012.65;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = interstellar ? "#04060e" : "#02060b"; ctx.fillRect(0, 0, W, H);
+    drawStars(); drawField(); drawBeam(); drawTrajectory(); drawCraft();
+    if (flash > 0) { ctx.fillStyle = `rgba(150,200,255,${flash * 0.18})`; ctx.fillRect(0, 0, W, H); }
+    drawHeader(); drawTelemetry(); drawLog(); drawScanlines();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
+<script>
+  (function () {
+    var frame = document.getElementById("frame");
+    var buttons = Array.from(document.querySelectorAll("#nav button"));
+    var NAMES = ["particles", "fluid", "voyager"];
+    var CLOSER = "<" + "/script>";
+    function show(name) {
+      var block = document.getElementById("src-" + name);
+      if (!block) return;
+      frame.srcdoc = block.textContent.split("<\\/scr" + "ipt>").join(CLOSER);
+      buttons.forEach(function (b) { b.classList.toggle("on", b.dataset.demo === name); });
+      if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+    }
+    buttons.forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.demo); }); });
+    var initial = (location.hash || "").replace("#", "");
+    show(NAMES.indexOf(initial) >= 0 ? initial : "particles");
+  })();
+</script>
+</body>
+</html>

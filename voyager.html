@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VOYAGER 1 · DEEP SPACE NETWORK</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #02060b; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #bar {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: #74e8a0;
+    background: rgba(4,12,10,.72); border: 1px solid rgba(116,232,160,.28);
+    border-radius: 8px; padding: 8px 12px; backdrop-filter: blur(6px); user-select: none;
+    box-shadow: 0 0 24px rgba(0,0,0,.6);
+  }
+  #bar button { cursor: pointer; font: 12px ui-monospace, monospace; color: #a7f3c9;
+    background: rgba(116,232,160,.10); border: 1px solid rgba(116,232,160,.35); border-radius: 5px; padding: 4px 10px; }
+  #bar button:hover { background: rgba(116,232,160,.22); }
+  #bar button.on { background: rgba(255,179,71,.18); border-color: rgba(255,179,71,.5); color: #ffcf8a; }
+  #bar input[type=range] { width: 280px; accent-color: #74e8a0; }
+  #bar a { color: #74e8a0; text-decoration: none; opacity: .7; } #bar a:hover { opacity: 1; }
+  #scrubDate { width: 90px; color: #ffcf8a; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">
+  <button id="play">❚❚ PAUSE</button>
+  <span>RATE</span>
+  <button class="rate" data-r="0.5">0.5×</button>
+  <button class="rate on" data-r="2">2×</button>
+  <button class="rate" data-r="8">8×</button>
+  <input id="scrub" type="range" min="1977.68" max="2035" step="0.01" value="1977.68">
+  <span id="scrubDate">1977-09-05</span>
+  <a href="index.html">▸ orrery</a>
+</div>
+
+<script type="text/javascript">
+"use strict";
+(function () {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  let DPR = 1, W = 0, H = 0;
+  const PI = Math.PI;
+
+  // ---------------- mission model ----------------
+  const WP = [
+    { y: 1977.68, au: 1.0, ang: 0 }, { y: 1979.18, au: 5.2, ang: 40 }, { y: 1980.87, au: 9.5, ang: 76 },
+    { y: 1990.12, au: 40.5, ang: 120 }, { y: 2004.96, au: 94.0, ang: 150 }, { y: 2012.65, au: 121.0, ang: 164 },
+    { y: 2026.45, au: 167.0, ang: 172 }, { y: 2035.0, au: 185.0, ang: 175 },
+  ];
+  const EVENTS = [
+    { y: 1977.68, t: "LAUNCH — Titan IIIE/Centaur, Cape Canaveral LC-41" },
+    { y: 1979.18, t: "JUPITER CLOSEST APPROACH 349,000 km — gravity assist Δv +16 km/s", a: 1 },
+    { y: 1980.87, t: "SATURN CLOSEST APPROACH 124,000 km — deflected +35.5° N of ecliptic", a: 1 },
+    { y: 1990.12, t: "FAMILY PORTRAIT — 'Pale Blue Dot' imaged from 40.5 AU" },
+    { y: 1998.13, t: "SURPASSES PIONEER 10 — most distant human-made object" },
+    { y: 2004.96, t: "TERMINATION SHOCK @ 94 AU — solar wind drops subsonic", a: 1 },
+    { y: 2012.65, t: "HELIOPAUSE CROSSING @ 121 AU — ENTERING INTERSTELLAR MEDIUM", a: 2 },
+    { y: 2017.0, t: "TRAJECTORY CORRECTION THRUSTERS fired after 37 yr dormant" },
+    { y: 2025.0, t: "NOMINAL — 3 instruments active on RTG decline" },
+  ];
+  const AU_KM = 1.495978707e8, AU_LT = 499.005, AUYR_KMS = 4.74057;
+  const lerp = (a, b, t) => a + (b - a) * t, smooth = (t) => t * t * (3 - 2 * t);
+
+  function stateAt(y) {
+    if (y <= WP[0].y) return { au: WP[0].au, ang: WP[0].ang };
+    if (y >= WP[WP.length - 1].y) return { au: WP[WP.length - 1].au, ang: WP[WP.length - 1].ang };
+    for (let i = 0; i < WP.length - 1; i++) if (y >= WP[i].y && y <= WP[i + 1].y) { const t = smooth((y - WP[i].y) / (WP[i + 1].y - WP[i].y)); return { au: lerp(WP[i].au, WP[i + 1].au, t), ang: lerp(WP[i].ang, WP[i + 1].ang, t) }; }
+    return { au: WP[0].au, ang: WP[0].ang };
+  }
+  function segRate(y) { for (let i = 0; i < WP.length - 1; i++) if (y >= WP[i].y && y <= WP[i + 1].y) return (WP[i + 1].au - WP[i].au) / (WP[i + 1].y - WP[i].y); const n = WP.length - 1; return (WP[n].au - WP[n - 1].au) / (WP[n].y - WP[n - 1].y); }
+  function phaseOf(y) { if (y < 1979.18) return "INNER CRUISE"; if (y < 1980.87) return "JOVIAN ENCOUNTER"; if (y < 2004.96) return "OUTER HELIOSPHERE CRUISE"; if (y < 2012.65) return "HELIOSHEATH TRANSIT"; return "INTERSTELLAR SPACE"; }
+  function yToDate(y) { const Y = Math.floor(y), doy = Math.floor((y - Y) * 365.25), d = new Date(Y, 0, 1 + doy); return { Y: d.getFullYear(), M: d.getMonth() + 1, D: d.getDate() }; }
+  function fmtDate(y) { const d = yToDate(y); return `${d.Y}-${String(d.M).padStart(2,"0")}-${String(d.D).padStart(2,"0")}`; }
+
+  // ---------------- top-down view: Sun at centre, sqrt(AU) radial scale ----------------
+  const RMAX = Math.sqrt(190);
+  let cx = 0, cy = 0, plotR = 0;
+  function rOf(au) { return Math.sqrt(Math.max(au, 0.0001)) / RMAX * plotR; }
+  function posOf(au, angDeg) { const a = (angDeg - 90) * PI / 180; return [cx + Math.cos(a) * rOf(au), cy + Math.sin(a) * rOf(au)]; }
+
+  const STARS = [];
+  function seedStars() { STARS.length = 0; for (let i = 0; i < 240; i++) STARS.push([Math.random(), Math.random(), 0.2 + Math.random() * 0.8]); }
+
+  // ---------------- state ----------------
+  let simYear = 1977.68, playing = true, rate = 2, last = performance.now(), flash = 0, crossedHP = false;
+  (function () { const q = new URLSearchParams(location.search); if (q.has("y")) simYear = Math.max(1977.68, Math.min(2035, parseFloat(q.get("y")) || 1977.68)); })();
+  const scrub = document.getElementById("scrub"), scrubDate = document.getElementById("scrubDate"), playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", () => { playing = !playing; playBtn.textContent = playing ? "❚❚ PAUSE" : "▶ PLAY"; playBtn.classList.toggle("on", !playing); });
+  document.querySelectorAll(".rate").forEach(b => b.addEventListener("click", () => { rate = parseFloat(b.dataset.r); document.querySelectorAll(".rate").forEach(x => x.classList.remove("on")); b.classList.add("on"); }));
+  scrub.addEventListener("input", () => { simYear = parseFloat(scrub.value); playing = false; playBtn.textContent = "▶ PLAY"; playBtn.classList.add("on"); crossedHP = simYear >= 2012.65; });
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth; H = canvas.clientHeight;
+    canvas.width = Math.floor(W * DPR); canvas.height = Math.floor(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    cx = W * 0.5 + 60; cy = H * 0.5; plotR = Math.min(W, H) * 0.40;
+    seedStars();
+  }
+  window.addEventListener("resize", resize); resize();
+
+  // ---------------- drawing ----------------
+  const GREEN = "#74e8a0", AMBER = "#ffb347";
+  const mono = (px) => `${px}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+
+  function drawStars() { for (const s of STARS) { ctx.globalAlpha = s[2] * 0.5; ctx.fillStyle = "#cfe8ff"; ctx.fillRect(s[0] * W, s[1] * H, 1.2, 1.2); } ctx.globalAlpha = 1; }
+  function dashedCircle(r, color, dash) { ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.setLineDash(dash || []); ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * PI); ctx.stroke(); ctx.setLineDash([]); }
+
+  function drawField() {
+    ctx.font = mono(9); ctx.textAlign = "left";
+    for (const au of [50, 100, 150]) {
+      dashedCircle(rOf(au), "rgba(116,232,160,0.12)", [2, 5]);
+      ctx.fillStyle = "rgba(116,232,160,0.35)"; ctx.fillText(au + " AU", cx + rOf(au) * 0.7071 + 2, cy - rOf(au) * 0.7071);
+    }
+    for (const au of [1, 5.2, 9.5]) dashedCircle(rOf(au), "rgba(120,170,255,0.30)");
+    dashedCircle(rOf(94), "rgba(255,179,71,0.35)", [4, 4]);
+    dashedCircle(rOf(121), "rgba(120,190,255,0.55)", [8, 4]);
+    ctx.fillStyle = "rgba(255,179,71,0.7)"; ctx.fillText("TERMINATION SHOCK", cx - 56, cy - rOf(94) - 4);
+    ctx.fillStyle = "rgba(150,200,255,0.9)"; ctx.fillText("HELIOPAUSE", cx - 34, cy - rOf(121) - 5);
+    ctx.fillStyle = "rgba(150,200,255,0.4)"; ctx.fillText("· INTERSTELLAR MEDIUM ·", cx - 70, cy - rOf(121) - 18);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 16);
+    g.addColorStop(0, "#fff7e0"); g.addColorStop(0.4, "#ffd86b"); g.addColorStop(1, "rgba(255,160,40,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, 16, 0, 2 * PI); ctx.fill();
+    ctx.fillStyle = "rgba(255,216,107,0.7)"; ctx.textAlign = "center"; ctx.fillText("☉ SUN", cx, cy + 26); ctx.textAlign = "left";
+  }
+  function drawTrajectory() {
+    ctx.lineWidth = 1.6; ctx.lineJoin = "round";
+    ctx.strokeStyle = "rgba(116,232,160,0.18)"; ctx.setLineDash([3, 4]); ctx.beginPath(); let st = false;
+    for (let y = 1977.68; y <= 2035; y += 0.04) { const s = stateAt(y); const [px, py] = posOf(s.au, s.ang); st ? ctx.lineTo(px, py) : ctx.moveTo(px, py); st = true; }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = GREEN; ctx.lineWidth = 1.8; ctx.beginPath(); st = false;
+    for (let y = 1977.68; y <= simYear; y += 0.02) { const s = stateAt(y); const [px, py] = posOf(s.au, s.ang); st ? ctx.lineTo(px, py) : ctx.moveTo(px, py); st = true; }
+    ctx.stroke();
+    ctx.font = mono(9); ctx.textAlign = "center";
+    for (const w of [WP[1], WP[2]]) {
+      const [px, py] = posOf(w.au, w.ang);
+      ctx.strokeStyle = AMBER; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(px, py, 6, 0, 2 * PI); ctx.stroke();
+      if (simYear >= w.y) { ctx.fillStyle = "rgba(255,179,71,0.85)"; ctx.fillText("SWING-BY", px, py - 10); }
+    }
+    ctx.textAlign = "left";
+  }
+  function drawBeam() {
+    const [ex, ey] = posOf(1, (simYear * 220) % 360);
+    const s = stateAt(simYear), [px, py] = posOf(s.au, s.ang);
+    ctx.strokeStyle = "rgba(120,190,255,0.12)"; ctx.lineWidth = 1; ctx.setLineDash([1, 6]);
+    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(px, py); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = "#7fb0ff"; ctx.beginPath(); ctx.arc(ex, ey, 2.2, 0, 2 * PI); ctx.fill();
+  }
+  function drawCraft() {
+    const s = stateAt(simYear), [px, py] = posOf(s.au, s.ang);
+    const blink = 0.55 + 0.45 * Math.sin(performance.now() / 240);
+    ctx.strokeStyle = `rgba(255,179,71,${blink})`; ctx.lineWidth = 1; ctx.beginPath();
+    ctx.moveTo(px - 11, py); ctx.lineTo(px - 4, py); ctx.moveTo(px + 4, py); ctx.lineTo(px + 11, py);
+    ctx.moveTo(px, py - 11); ctx.lineTo(px, py - 4); ctx.moveTo(px, py + 4); ctx.lineTo(px, py + 11); ctx.stroke();
+    ctx.fillStyle = AMBER; ctx.beginPath(); ctx.arc(px, py, 2.4, 0, 2 * PI); ctx.fill();
+    ctx.font = mono(10); ctx.fillStyle = "#ffcf8a"; ctx.textAlign = "left";
+    ctx.fillText("VGR-1  " + s.au.toFixed(1) + " AU", px + 14, py + 3);
+  }
+
+  // ---------------- HUD ----------------
+  function panel(x, y, w, h) {
+    ctx.fillStyle = "rgba(4,14,11,0.66)"; ctx.strokeStyle = "rgba(116,232,160,0.25)"; ctx.lineWidth = 1;
+    ctx.fillRect(x, y, w, h); ctx.strokeRect(x, y, w, h);
+    ctx.strokeStyle = GREEN; const c = 8;
+    [[x,y,1,1],[x+w,y,-1,1],[x,y+h,1,-1],[x+w,y+h,-1,-1]].forEach(([px,py,sx,sy]) => { ctx.beginPath(); ctx.moveTo(px, py + sy*c); ctx.lineTo(px, py); ctx.lineTo(px + sx*c, py); ctx.stroke(); });
+  }
+  function drawHeader() {
+    panel(16, 14, 360, 34); ctx.fillStyle = GREEN; ctx.font = mono(13); ctx.textAlign = "left";
+    ctx.fillText("VOYAGER 1 · DEEP SPACE NETWORK", 28, 36);
+    const rec = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    ctx.fillStyle = `rgba(255,80,80,${rec})`; ctx.beginPath(); ctx.arc(352, 31, 4, 0, 2 * PI); ctx.fill();
+    ctx.fillStyle = "rgba(255,120,120,0.8)"; ctx.font = mono(9); ctx.fillText("LIVE", 340, 44);
+  }
+  function row(x, y, k, v, vc) { ctx.fillStyle = "rgba(116,232,160,0.55)"; ctx.font = mono(10); ctx.fillText(k, x, y); ctx.fillStyle = vc || "#cdeede"; ctx.font = mono(12); ctx.fillText(v, x, y + 15); }
+  function drawTelemetry() {
+    const px = W - 290, py = 14, pw = 274, ph = 252; panel(px, py, pw, ph);
+    ctx.fillStyle = GREEN; ctx.font = mono(11); ctx.textAlign = "left"; ctx.fillText("▣ SPACECRAFT TELEMETRY", px + 14, py + 22);
+    ctx.strokeStyle = "rgba(116,232,160,0.2)"; ctx.beginPath(); ctx.moveTo(px+14, py+30); ctx.lineTo(px+pw-14, py+30); ctx.stroke();
+    const s = stateAt(simYear), kms = segRate(simYear) * AUYR_KMS, ltSec = s.au * AU_LT;
+    const ltH = Math.floor(ltSec / 3600), ltM = Math.floor((ltSec % 3600) / 60);
+    const metY = simYear - 1977.68, metYi = Math.floor(metY), metD = Math.floor((metY - metYi) * 365.25);
+    const interstellar = simYear >= 2012.65; let X = px + 14, Y = py + 52;
+    row(X, Y, "EARTH DATE", fmtDate(simYear), "#ffcf8a"); row(X + 138, Y, "MISSION ELAPSED", `${metYi}y ${metD}d`); Y += 40;
+    row(X, Y, "HELIOCENTRIC DIST", s.au.toFixed(2) + " AU"); row(X + 138, Y, "", (s.au * AU_KM).toExponential(3) + " km"); Y += 40;
+    row(X, Y, "VELOCITY (SUN)", kms.toFixed(2) + " km/s"); row(X + 138, Y, "1-WAY LIGHT TIME", `${ltH}h ${String(ltM).padStart(2,"0")}m`); Y += 40;
+    row(X, Y, "MISSION PHASE", phaseOf(simYear), interstellar ? "#9fd0ff" : "#cdeede"); row(X + 138, Y, "DSN STATION", "DSS-43 CBR"); Y += 40;
+    ctx.fillStyle = "rgba(116,232,160,0.55)"; ctx.font = mono(10); ctx.fillText("DOWNLINK", X, Y);
+    const bars = Math.max(1, Math.round(6 - s.au / 35));
+    for (let i = 0; i < 8; i++) { ctx.fillStyle = i < bars ? GREEN : "rgba(116,232,160,0.18)"; ctx.fillRect(X + 70 + i * 9, Y - 8, 6, 10); }
+    ctx.fillStyle = "rgba(116,232,160,0.7)"; ctx.font = mono(9); ctx.fillText("160 bps · X-BAND", X + 150, Y);
+  }
+  function drawLog() {
+    const px = 16, ph = 150, py = H - ph - 56, pw = 470; panel(px, py, pw, ph);
+    ctx.fillStyle = GREEN; ctx.font = mono(11); ctx.fillText("▣ EVENT LOG", px + 14, py + 20);
+    const shown = EVENTS.filter(e => e.y <= simYear).slice(-6); let y = py + 40;
+    for (const e of shown) {
+      const col = e.a === 2 ? "#9fd0ff" : e.a === 1 ? "#ffcf8a" : "rgba(160,230,190,0.85)";
+      ctx.fillStyle = "rgba(116,232,160,0.5)"; ctx.font = mono(9); ctx.fillText("[" + fmtDate(e.y) + "]", px + 14, y);
+      ctx.fillStyle = col; ctx.font = mono(10);
+      const words = e.t.split(" "); let line = "", lx = px + 96;
+      for (const w of words) { if ((line + w).length > 44) { ctx.fillText(line, lx, y); y += 13; line = ""; } line += w + " "; }
+      ctx.fillText(line, lx, y); y += 17;
+    }
+    if (Math.sin(performance.now() / 300) > 0) { ctx.fillStyle = GREEN; ctx.fillRect(px + 14, y - 8, 7, 10); }
+  }
+  function drawScanlines() {
+    ctx.fillStyle = "rgba(0,0,0,0.10)"; for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+    const g = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.3, W/2, H/2, Math.max(W,H)*0.7);
+    g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.55)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+
+  // ---------------- loop ----------------
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05); last = now;
+    if (playing) { simYear += dt * rate; if (simYear >= 2035) { simYear = 2035; playing = false; playBtn.textContent = "▶ PLAY"; } scrub.value = simYear; }
+    scrubDate.textContent = fmtDate(simYear);
+    if (!crossedHP && simYear >= 2012.65) { crossedHP = true; flash = 1; } if (simYear < 2012.65) crossedHP = false;
+    flash = Math.max(0, flash - dt * 0.7);
+
+    const s = stateAt(simYear), interstellar = simYear >= 2012.65;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = interstellar ? "#04060e" : "#02060b"; ctx.fillRect(0, 0, W, H);
+    drawStars(); drawField(); drawBeam(); drawTrajectory(); drawCraft();
+    if (flash > 0) { ctx.fillStyle = `rgba(150,200,255,${flash * 0.18})`; ctx.fillRect(0, 0, W, H); }
+    drawHeader(); drawTelemetry(); drawLog(); drawScanlines();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
