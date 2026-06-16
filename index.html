@@ -11,7 +11,7 @@
   #nav { height: 42px; display: flex; align-items: center; gap: 5px; padding: 0 12px; background: #06090f; border-bottom: 1px solid rgba(255,255,255,.08); overflow-x: auto; white-space: nowrap; }
   #nav::-webkit-scrollbar { height: 0; }
   #nav .brand { color: #89b4fa; font-size: 13px; font-weight: 600; letter-spacing: .04em; margin-right: 10px; flex: none; }
-  #nav button { flex: none; cursor: pointer; font: 12px ui-monospace, monospace; color: #cdd6f4; background: rgba(137,180,250,.10); border: 1px solid rgba(137,180,250,.26); border-radius: 6px; padding: 5px 11px; }
+  #nav button { flex: none; cursor: pointer; font: 12px ui-monospace, monospace; color: #cdd6f4; background: rgba(137,180,250,.10); border: 1px solid rgba(137,180,250,.26); border-radius: 6px; padding: 5px 10px; }
   #nav button:hover { background: rgba(137,180,250,.2); }
   #nav button.on { background: rgba(137,180,250,.3); border-color: #89b4fa; color: #fff; }
   #frame { display: block; width: 100vw; height: calc(100vh - 42px); border: 0; background: #02060b; }
@@ -26,8 +26,11 @@
     <button data-demo="blackhole">◉ Black Hole</button>
     <button data-demo="fractal">❋ Mandelbulb</button>
     <button data-demo="galaxy">✦ Galaxy</button>
+    <button data-demo="ocean">≋ Ocean</button>
     <button data-demo="reaction">⬡ Reaction</button>
     <button data-demo="slime">🦠 Slime</button>
+    <button data-demo="cloth">▦ Cloth</button>
+    <button data-demo="audio">♫ Audio</button>
   </div>
   <iframe id="frame" title="demo"></iframe>
 <script type="text/html" id="src-particles">
@@ -1895,6 +1898,120 @@ window.addEventListener("error", (e) => {
 </body>
 </html>
 </script>
+<script type="text/html" id="src-ocean">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ocean</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#0a1420}
+  canvas{display:block;width:100vw;height:100vh;cursor:grab} canvas:active{cursor:grabbing}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#bfe0ff;opacity:.85;user-select:none}#t b{color:#7fc4ff}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>≋ OCEAN</b> · Gerstner waves · drag to look around</div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 not supported</p>";return;}
+  // ---- mat4 ----
+  function persp(f,a,n,fa){const t=1/Math.tan(f/2),o=new Float32Array(16);o[0]=t/a;o[5]=t;o[10]=(fa+n)/(n-fa);o[11]=-1;o[14]=2*fa*n/(n-fa);return o;}
+  function look(e,c,u){const z=norm(sub(e,c)),x=norm(cross(u,z)),y=cross(z,x);return new Float32Array([x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,e),-dot(y,e),-dot(z,e),1]);}
+  function mul(a,b){const o=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+j]*b[i*4+k];o[i*4+j]=s;}return o;}
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],norm=a=>{const l=Math.hypot(...a)||1;return [a[0]/l,a[1]/l,a[2]/l];};
+
+  const vs=`#version 300 es
+  precision highp float;
+  layout(location=0) in vec2 g; uniform mat4 u_vp; uniform float u_time; uniform vec3 u_cam;
+  out vec3 v_pos; out vec3 v_nrm;
+  // gerstner waves
+  vec3 gerstner(vec2 p, out vec3 nrm){
+    vec3 P=vec3(p.x,0.,p.y); vec3 n=vec3(0.,1.,0.);
+    // dir, amp, len, speed
+    const int N=6;
+    vec2 dir[6]; float amp[6]; float len[6]; float spd[6];
+    dir[0]=vec2(1.,0.3); amp[0]=0.32; len[0]=8.0; spd[0]=1.0;
+    dir[1]=vec2(-0.7,1.0); amp[1]=0.20; len[1]=4.5; spd[1]=1.3;
+    dir[2]=vec2(0.5,-0.8); amp[2]=0.12; len[2]=2.6; spd[2]=1.7;
+    dir[3]=vec2(1.0,1.0); amp[3]=0.07; len[3]=1.5; spd[3]=2.2;
+    dir[4]=vec2(-1.0,0.2); amp[4]=0.045; len[4]=0.9; spd[4]=2.8;
+    dir[5]=vec2(0.2,1.0); amp[5]=0.03; len[5]=0.55; spd[5]=3.4;
+    for(int i=0;i<N;i++){
+      vec2 d=normalize(dir[i]); float w=6.2831/len[i]; float ph=spd[i]*w*u_time;
+      float steep=0.7/(w*amp[i]*float(N));
+      float a=dot(d,p)*w+ph; float c=cos(a),s=sin(a);
+      P.x+=steep*amp[i]*d.x*c; P.z+=steep*amp[i]*d.y*c; P.y+=amp[i]*s;
+      float wa=w*amp[i];
+      n.x-=d.x*wa*c; n.z-=d.y*wa*c; n.y-=steep*wa*s;
+    }
+    nrm=normalize(n); return P;
+  }
+  void main(){ vec3 nrm; vec3 P=gerstner(g,nrm); v_pos=P; v_nrm=nrm; gl_Position=u_vp*vec4(P,1.); }`;
+  const fs=`#version 300 es
+  precision highp float; in vec3 v_pos; in vec3 v_nrm; uniform vec3 u_cam; uniform float u_time; out vec4 o;
+  vec3 sky(vec3 d){
+    float t=clamp(d.y*0.5+0.5,0.,1.);
+    vec3 c=mix(vec3(.55,.7,.9),vec3(.15,.35,.7),smoothstep(0.,1.,t));
+    vec3 sun=normalize(vec3(0.4,0.5,-0.7));
+    c+=vec3(1.,.9,.7)*pow(max(dot(d,sun),0.),120.)*1.5; // sun
+    c+=vec3(1.,.95,.85)*pow(max(dot(d,sun),0.),8.)*0.15;
+    return c;
+  }
+  void main(){
+    vec3 N=normalize(v_nrm); vec3 V=normalize(u_cam-v_pos);
+    vec3 sun=normalize(vec3(0.4,0.5,-0.7));
+    float fres=pow(1.-max(dot(N,V),0.),5.); fres=mix(0.04,1.,fres);
+    vec3 R=reflect(-V,N); vec3 refl=sky(R);
+    vec3 deep=vec3(0.01,0.06,0.12), shallow=vec3(0.0,0.22,0.32);
+    vec3 water=mix(deep,shallow,max(N.y,0.)*0.6);
+    float spec=pow(max(dot(R,sun),0.),200.)*2.0;             // glitter
+    float foam=smoothstep(0.5,0.62,v_pos.y)*0.8;             // crest foam
+    vec3 col=mix(water,refl,fres)+vec3(spec)+vec3(foam);
+    // distance fog to horizon
+    float fog=clamp(length(u_cam.xz-v_pos.xz)/55.,0.,1.);
+    col=mix(col,sky(normalize(v_pos-u_cam)),fog*fog);
+    o=vec4(pow(col,vec3(0.85)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);
+  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw gl.getProgramInfoLog(pr);
+  // grid mesh
+  const G=180, S=60;
+  const verts=[]; for(let z=0;z<G;z++)for(let x=0;x<G;x++){verts.push((x/(G-1)-0.5)*S,(z/(G-1)-0.5)*S);}
+  const idx=[]; for(let z=0;z<G-1;z++)for(let x=0;x<G-1;x++){const i=z*G+x;idx.push(i,i+1,i+G,i+1,i+G+1,i+G);}
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);
+  const vb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(verts),gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(idx),gl.STATIC_DRAW);
+  const U={vp:gl.getUniformLocation(pr,"u_vp"),time:gl.getUniformLocation(pr,"u_time"),cam:gl.getUniformLocation(pr,"u_cam")};
+  let yaw=0.4,pitch=-0.12,drag=null;
+  cv.addEventListener("pointerdown",e=>drag=[e.clientX,e.clientY]);window.addEventListener("pointerup",()=>drag=null);
+  cv.addEventListener("pointermove",e=>{if(!drag)return;yaw-=(e.clientX-drag[0])*0.004;pitch=Math.max(-0.5,Math.min(0.3,pitch-(e.clientY-drag[1])*0.003));drag=[e.clientX,e.clientY];});
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;}
+  addEventListener("resize",rs);rs();
+  gl.enable(gl.DEPTH_TEST);gl.useProgram(pr);
+  function frame(t){
+    rs();gl.viewport(0,0,cv.width,cv.height);
+    gl.clearColor(0.5,0.66,0.86,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    const time=t*0.001;
+    const cam=[0,2.6,0];
+    const dir=[Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch)];
+    const target=[cam[0]+dir[0],cam[1]+dir[1],cam[2]+dir[2]];
+    const vp=mul(persp(1.0,cv.width/cv.height,0.1,200),look(cam,target,[0,1,0]));
+    gl.uniformMatrix4fv(U.vp,false,vp);gl.uniform1f(U.time,time);gl.uniform3f(U.cam,cam[0],cam[1],cam[2]);
+    gl.bindVertexArray(vao);gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
 <script type="text/html" id="src-reaction">
 <!DOCTYPE html>
 <html lang="en">
@@ -2119,11 +2236,244 @@ window.addEventListener("error", (e) => {
 </body>
 </html>
 </script>
+<script type="text/html" id="src-cloth">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cloth</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#0b0d12}
+  canvas{display:block;width:100vw;height:100vh;cursor:grab;touch-action:none} canvas:active{cursor:grabbing}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#ffd0d8;opacity:.85;user-select:none}#t b{color:#ff9fb0}
+  #t button{margin-left:8px;cursor:pointer;font:11px ui-monospace,monospace;color:#cdd6f4;background:rgba(255,159,176,.14);border:1px solid rgba(255,159,176,.4);border-radius:5px;padding:3px 8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>▦ CLOTH</b> · Verlet · drag to grab · right-drag to tear <button id="r">Reset</button> <button id="w">Wind</button></div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 not supported</p>";return;}
+  const vs=`#version 300 es
+  precision highp float; layout(location=0) in vec3 p; layout(location=1) in vec3 n;
+  uniform float u_aspect, u_scale; out vec3 v_n; out float v_z;
+  void main(){ v_n=n; v_z=p.z; gl_Position=vec4(p.x/(u_aspect*u_scale), p.y/u_scale, 0., 1.); }`;
+  const fs=`#version 300 es
+  precision highp float; in vec3 v_n; in float v_z; out vec4 o;
+  void main(){
+    vec3 N=normalize(v_n); vec3 L=normalize(vec3(0.4,0.5,0.8));
+    if(!gl_FrontFacing) N=-N;
+    float dif=max(dot(N,L),0.)*0.85+0.4;
+    float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),24.)*0.5;
+    vec3 base=mix(vec3(0.9,0.28,0.36),vec3(1.0,0.62,0.42),clamp(v_z*0.18+0.5,0.,1.));
+    vec3 col=base*dif+vec3(spec);
+    o=vec4(pow(col,vec3(0.85)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);
+  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw gl.getProgramInfoLog(pr);
+  const CW=64, CH=44, SP=0.55, SCALE=CH*SP*0.62;
+  let px,py,pz,ox,oy,oz,pin,cons,wind=true,aspect=1;
+  function reset(){
+    px=new Float32Array(CW*CH);py=new Float32Array(CW*CH);pz=new Float32Array(CW*CH);
+    ox=new Float32Array(CW*CH);oy=new Float32Array(CW*CH);oz=new Float32Array(CW*CH);
+    pin=new Uint8Array(CW*CH);
+    for(let y=0;y<CH;y++)for(let x=0;x<CW;x++){const i=y*CW+x;
+      px[i]=ox[i]=(x-(CW-1)/2)*SP; py[i]=oy[i]=((CH-1)/2-y)*SP; pz[i]=oz[i]=Math.sin(x*0.5)*0.5;
+      if(y===0 && x%6===0) pin[i]=1;}
+    cons=[];
+    for(let y=0;y<CH;y++)for(let x=0;x<CW;x++){const i=y*CW+x;
+      if(x<CW-1) cons.push([i,i+1,SP]);
+      if(y<CH-1) cons.push([i,i+CW,SP]);
+      if(x<CW-1&&y<CH-1) cons.push([i,i+CW+1,SP*1.414]);}
+  }
+  const Au={aspect:gl.getUniformLocation(pr,"u_aspect"),scale:gl.getUniformLocation(pr,"u_scale")};
+  // geometry buffers
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);
+  const pbuf=gl.createBuffer(),nbuf=gl.createBuffer(),ibuf=gl.createBuffer();
+  const idx=[];for(let y=0;y<CH-1;y++)for(let x=0;x<CW-1;x++){const i=y*CW+x;idx.push(i,i+1,i+CW,i+1,i+CW+1,i+CW);}
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibuf);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(idx),gl.STATIC_DRAW);
+  const pos=new Float32Array(CW*CH*3), nrm=new Float32Array(CW*CH*3);
+  gl.bindBuffer(gl.ARRAY_BUFFER,pbuf);gl.bufferData(gl.ARRAY_BUFFER,pos.byteLength,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+  gl.bindBuffer(gl.ARRAY_BUFFER,nbuf);gl.bufferData(gl.ARRAY_BUFFER,nrm.byteLength,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,0);
+  // interaction (screen<->world via ortho)
+  const mouse={x:0,y:0,px:0,py:0,d:0,btn:0};
+  function toWorld(e){const r=cv.getBoundingClientRect();const nx=(e.clientX-r.left)/r.width*2-1,ny=-((e.clientY-r.top)/r.height*2-1);return [nx*aspect*SCALE,ny*SCALE];}
+  cv.addEventListener("contextmenu",e=>e.preventDefault());
+  cv.addEventListener("pointerdown",e=>{const w=toWorld(e);mouse.x=mouse.px=w[0];mouse.y=mouse.py=w[1];mouse.d=1;mouse.btn=e.button;});
+  window.addEventListener("pointerup",()=>mouse.d=0);
+  cv.addEventListener("pointermove",e=>{const w=toWorld(e);mouse.px=mouse.x;mouse.py=mouse.y;mouse.x=w[0];mouse.y=w[1];});
+  document.getElementById("r").onclick=reset;document.getElementById("w").onclick=()=>wind=!wind;
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;aspect=cv.clientWidth/cv.clientHeight;}
+  addEventListener("resize",rs);rs();reset();
+  gl.useProgram(pr);
+  let last=performance.now();
+  function step(t){
+    const dt=0.016, g=-9.0*dt*dt;
+    const wx=wind?(Math.sin(t*0.0013)*0.6+Math.sin(t*0.0041)*0.3)*0.03:0;
+    const wz=wind?(0.5+0.5*Math.sin(t*0.0017))*0.11:0;
+    for(let i=0;i<CW*CH;i++){ if(pin[i])continue;
+      const vx=(px[i]-ox[i])*0.99, vy=(py[i]-oy[i])*0.99, vz=(pz[i]-oz[i])*0.99;
+      ox[i]=px[i];oy[i]=py[i];oz[i]=pz[i];
+      px[i]+=vx+wx; py[i]+=vy+g; pz[i]+=vz+wz*(0.5+0.5*Math.sin(i*0.3+t*0.003));
+    }
+    // mouse grab / tear
+    if(mouse.d){
+      const R=mouse.btn===2?1.6:2.2;
+      for(let i=0;i<CW*CH;i++){ const dx=px[i]-mouse.x,dy=py[i]-mouse.y; if(dx*dx+dy*dy<R*R){
+        if(mouse.btn===2){ /* tear */ } else if(!pin[i]){ px[i]+= (mouse.x-mouse.px)*0.6; py[i]+=(mouse.y-mouse.py)*0.6; }
+      }}
+      if(mouse.btn===2){ cons=cons.filter(c=>{const a=c[0],b=c[1];const mx=(px[a]+px[b])*0.5,my=(py[a]+py[b])*0.5;return (mx-mouse.x)**2+(my-mouse.y)**2 > R*R;}); }
+    }
+    // constraints
+    for(let it=0;it<5;it++) for(const c of cons){const a=c[0],b=c[1];
+      let dx=px[b]-px[a],dy=py[b]-py[a],dz=pz[b]-pz[a];const dl=Math.hypot(dx,dy,dz)||1e-4;const diff=(dl-c[2])/dl*0.5;
+      dx*=diff;dy*=diff;dz*=diff;
+      if(!pin[a]){px[a]+=dx;py[a]+=dy;pz[a]+=dz;} if(!pin[b]){px[b]-=dx;py[b]-=dy;pz[b]-=dz;}
+    }
+  }
+  function build(){
+    for(let i=0;i<CW*CH;i++){pos[i*3]=px[i];pos[i*3+1]=py[i];pos[i*3+2]=pz[i];nrm[i*3]=0;nrm[i*3+1]=0;nrm[i*3+2]=0;}
+    for(let y=0;y<CH-1;y++)for(let x=0;x<CW-1;x++){const i=y*CW+x;
+      const ax=px[i+1]-px[i],ay=py[i+1]-py[i],az=pz[i+1]-pz[i];
+      const bx=px[i+CW]-px[i],by=py[i+CW]-py[i],bz=pz[i+CW]-pz[i];
+      const nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+      for(const j of [i,i+1,i+CW,i+CW+1]){nrm[j*3]+=nx;nrm[j*3+1]+=ny;nrm[j*3+2]+=nz;}}
+  }
+  function frame(t){
+    rs();step(t);build();
+    gl.bindBuffer(gl.ARRAY_BUFFER,pbuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER,nbuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,nrm);
+    gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0.043,0.051,0.07,1);gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(Au.aspect,aspect);gl.uniform1f(Au.scale,SCALE);
+    gl.bindVertexArray(vao);gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
+<script type="text/html" id="src-audio">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audio Visualizer</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  canvas{display:block;width:100vw;height:100vh}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#b8f0ff;opacity:.88;user-select:none}#t b{color:#6fe0ff}
+  #t button{margin-left:8px;cursor:pointer;font:11px ui-monospace,monospace;color:#cdd6f4;background:rgba(111,224,255,.14);border:1px solid rgba(111,224,255,.4);border-radius:5px;padding:3px 8px}
+  #t button.on{background:rgba(166,227,161,.22);border-color:rgba(166,227,161,.5);color:#a6e3a1}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>♫ AUDIO VISUALIZER</b> · <span id="src">synth</span> <button id="mic">🎤 Mic</button> <button id="p">Palette</button></div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 not supported</p>";return;}
+  const NB=128;
+  const vs=`#version 300 es
+  layout(location=0) in vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }`;
+  const fs=`#version 300 es
+  precision highp float;
+  uniform vec2 u_res; uniform float u_time, u_bass, u_pal; uniform sampler2D u_fft;
+  out vec4 o;
+  vec3 pal(float t,float m){
+    if(m<0.5) return 0.5+0.5*cos(6.2831*(t+vec3(0.0,0.33,0.66)));
+    if(m<1.5) return vec3(t,pow(t,1.6)*0.8,1.2-t);
+    return vec3(1.2-t*0.6,t*0.9,0.4+t*0.6);
+  }
+  void main(){
+    vec2 uv=(gl_FragCoord.xy*2.-u_res)/u_res.y;
+    float r=length(uv), a=atan(uv.y,uv.x);
+    float bin=abs(a)/3.14159;                    // 0..1 mirrored
+    float m=texture(u_fft,vec2(bin,0.5)).r;
+    float R0=0.35+u_bass*0.12;                    // ring pulses with bass
+    vec3 col=vec3(0.);
+    // radial spectrum bars
+    float bar=smoothstep(0.012,0.0,abs(r-(R0+m*0.45)));
+    float fill=smoothstep(R0+m*0.45,R0,r)*step(R0,r);
+    vec3 c=pal(bin*0.8+u_time*0.03,u_pal);
+    col+=c*(bar*1.4+fill*0.5);
+    // inner waveform ring
+    float wob=m*0.06*sin(a*40.+u_time*4.);
+    col+=c*smoothstep(0.01,0.,abs(r-(R0-0.05)+wob))*0.8;
+    // bass core glow
+    col+=pal(u_time*0.05,u_pal)*exp(-r*3.5)*(0.3+u_bass*1.4);
+    // faint particles
+    col+=c*exp(-abs(r-R0*1.6)*8.)*m*0.5;
+    col=col/(col+0.7)*1.5;                         // tonemap
+    o=vec4(pow(col,vec3(0.85)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);
+  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw gl.getProgramInfoLog(pr);
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  const fftTex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,fftTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,NB,1,0,gl.RED,gl.UNSIGNED_BYTE,new Uint8Array(NB));
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const U={res:gl.getUniformLocation(pr,"u_res"),time:gl.getUniformLocation(pr,"u_time"),bass:gl.getUniformLocation(pr,"u_bass"),pal:gl.getUniformLocation(pr,"u_pal"),fft:gl.getUniformLocation(pr,"u_fft")};
+  let pal=0,analyser=null,real=null;
+  const fft=new Uint8Array(NB);
+  // synthetic spectrum (always animates, no permission needed)
+  function synth(t){
+    const beat=Math.pow(0.5+0.5*Math.sin(t*3.2),6.0);            // kick
+    for(let i=0;i<NB;i++){
+      const f=i/NB;
+      let v=Math.exp(-f*3.0)*(0.5+beat*0.6);                     // bass-heavy
+      v+=0.35*Math.exp(-Math.pow((f-0.3-0.12*Math.sin(t*0.7)),2)*60.);
+      v+=0.25*Math.exp(-Math.pow((f-0.55-0.1*Math.sin(t*1.3)),2)*120.);
+      v+=0.18*Math.abs(Math.sin(f*40.+t*5.))*Math.exp(-f*1.2);   // treble sparkle
+      v*=0.8+0.2*Math.sin(t*2.+f*10.);
+      fft[i]=Math.max(0,Math.min(255,v*255));
+    }
+  }
+  document.getElementById("p").onclick=()=>pal=(pal+1)%3;
+  const micBtn=document.getElementById("mic");
+  micBtn.onclick=async()=>{
+    if(real){ real.getTracks().forEach(t=>t.stop()); real=null; analyser=null; micBtn.classList.remove("on"); document.getElementById("src").textContent="synth"; return; }
+    try{
+      real=await navigator.mediaDevices.getUserMedia({audio:true});
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      const src=ac.createMediaStreamSource(real); analyser=ac.createAnalyser(); analyser.fftSize=256; analyser.smoothingTimeConstant=0.75; src.connect(analyser);
+      micBtn.classList.add("on"); document.getElementById("src").textContent="mic";
+    }catch(e){ alert("Mic access denied — staying on synth."); real=null; }
+  };
+  const raw=new Uint8Array(256);
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;}
+  addEventListener("resize",rs);rs();gl.useProgram(pr);
+  function frame(t){
+    rs();gl.viewport(0,0,cv.width,cv.height);const tm=t*0.001;
+    if(analyser){ analyser.getByteFrequencyData(raw); for(let i=0;i<NB;i++) fft[i]=raw[i]; }
+    else synth(tm);
+    let bass=0; for(let i=0;i<12;i++) bass+=fft[i]; bass=bass/12/255;
+    gl.bindTexture(gl.TEXTURE_2D,fftTex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,NB,1,gl.RED,gl.UNSIGNED_BYTE,fft);
+    gl.uniform2f(U.res,cv.width,cv.height);gl.uniform1f(U.time,tm);gl.uniform1f(U.bass,bass);gl.uniform1f(U.pal,pal);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,fftTex);gl.uniform1i(U.fft,0);
+    gl.drawArrays(gl.TRIANGLES,0,3);requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+<\/script>
+</body>
+</html>
+</script>
 <script>
   (function () {
     var frame = document.getElementById("frame");
     var buttons = Array.from(document.querySelectorAll("#nav button"));
-    var NAMES = ["particles","fluid","voyager","blackhole","fractal","galaxy","reaction","slime"];
+    var NAMES = ["particles","fluid","voyager","blackhole","fractal","galaxy","ocean","reaction","slime","cloth","audio"];
     var CLOSER = "<" + "/script>";
     function show(name) {
       var block = document.getElementById("src-" + name);

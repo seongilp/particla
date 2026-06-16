@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cloth</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#0b0d12}
+  canvas{display:block;width:100vw;height:100vh;cursor:grab;touch-action:none} canvas:active{cursor:grabbing}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#ffd0d8;opacity:.85;user-select:none}#t b{color:#ff9fb0}
+  #t button{margin-left:8px;cursor:pointer;font:11px ui-monospace,monospace;color:#cdd6f4;background:rgba(255,159,176,.14);border:1px solid rgba(255,159,176,.4);border-radius:5px;padding:3px 8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>▦ CLOTH</b> · Verlet · drag to grab · right-drag to tear <button id="r">Reset</button> <button id="w">Wind</button></div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 not supported</p>";return;}
+  const vs=`#version 300 es
+  precision highp float; layout(location=0) in vec3 p; layout(location=1) in vec3 n;
+  uniform float u_aspect, u_scale; out vec3 v_n; out float v_z;
+  void main(){ v_n=n; v_z=p.z; gl_Position=vec4(p.x/(u_aspect*u_scale), p.y/u_scale, 0., 1.); }`;
+  const fs=`#version 300 es
+  precision highp float; in vec3 v_n; in float v_z; out vec4 o;
+  void main(){
+    vec3 N=normalize(v_n); vec3 L=normalize(vec3(0.4,0.5,0.8));
+    if(!gl_FrontFacing) N=-N;
+    float dif=max(dot(N,L),0.)*0.85+0.4;
+    float spec=pow(max(dot(reflect(-L,N),vec3(0,0,1)),0.),24.)*0.5;
+    vec3 base=mix(vec3(0.9,0.28,0.36),vec3(1.0,0.62,0.42),clamp(v_z*0.18+0.5,0.,1.));
+    vec3 col=base*dif+vec3(spec);
+    o=vec4(pow(col,vec3(0.85)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);
+  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw gl.getProgramInfoLog(pr);
+  const CW=64, CH=44, SP=0.55, SCALE=CH*SP*0.62;
+  let px,py,pz,ox,oy,oz,pin,cons,wind=true,aspect=1;
+  function reset(){
+    px=new Float32Array(CW*CH);py=new Float32Array(CW*CH);pz=new Float32Array(CW*CH);
+    ox=new Float32Array(CW*CH);oy=new Float32Array(CW*CH);oz=new Float32Array(CW*CH);
+    pin=new Uint8Array(CW*CH);
+    for(let y=0;y<CH;y++)for(let x=0;x<CW;x++){const i=y*CW+x;
+      px[i]=ox[i]=(x-(CW-1)/2)*SP; py[i]=oy[i]=((CH-1)/2-y)*SP; pz[i]=oz[i]=Math.sin(x*0.5)*0.5;
+      if(y===0 && x%6===0) pin[i]=1;}
+    cons=[];
+    for(let y=0;y<CH;y++)for(let x=0;x<CW;x++){const i=y*CW+x;
+      if(x<CW-1) cons.push([i,i+1,SP]);
+      if(y<CH-1) cons.push([i,i+CW,SP]);
+      if(x<CW-1&&y<CH-1) cons.push([i,i+CW+1,SP*1.414]);}
+  }
+  const Au={aspect:gl.getUniformLocation(pr,"u_aspect"),scale:gl.getUniformLocation(pr,"u_scale")};
+  // geometry buffers
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);
+  const pbuf=gl.createBuffer(),nbuf=gl.createBuffer(),ibuf=gl.createBuffer();
+  const idx=[];for(let y=0;y<CH-1;y++)for(let x=0;x<CW-1;x++){const i=y*CW+x;idx.push(i,i+1,i+CW,i+1,i+CW+1,i+CW);}
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibuf);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint32Array(idx),gl.STATIC_DRAW);
+  const pos=new Float32Array(CW*CH*3), nrm=new Float32Array(CW*CH*3);
+  gl.bindBuffer(gl.ARRAY_BUFFER,pbuf);gl.bufferData(gl.ARRAY_BUFFER,pos.byteLength,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
+  gl.bindBuffer(gl.ARRAY_BUFFER,nbuf);gl.bufferData(gl.ARRAY_BUFFER,nrm.byteLength,gl.DYNAMIC_DRAW);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(1,3,gl.FLOAT,false,0,0);
+  // interaction (screen<->world via ortho)
+  const mouse={x:0,y:0,px:0,py:0,d:0,btn:0};
+  function toWorld(e){const r=cv.getBoundingClientRect();const nx=(e.clientX-r.left)/r.width*2-1,ny=-((e.clientY-r.top)/r.height*2-1);return [nx*aspect*SCALE,ny*SCALE];}
+  cv.addEventListener("contextmenu",e=>e.preventDefault());
+  cv.addEventListener("pointerdown",e=>{const w=toWorld(e);mouse.x=mouse.px=w[0];mouse.y=mouse.py=w[1];mouse.d=1;mouse.btn=e.button;});
+  window.addEventListener("pointerup",()=>mouse.d=0);
+  cv.addEventListener("pointermove",e=>{const w=toWorld(e);mouse.px=mouse.x;mouse.py=mouse.y;mouse.x=w[0];mouse.y=w[1];});
+  document.getElementById("r").onclick=reset;document.getElementById("w").onclick=()=>wind=!wind;
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;aspect=cv.clientWidth/cv.clientHeight;}
+  addEventListener("resize",rs);rs();reset();
+  gl.useProgram(pr);
+  let last=performance.now();
+  function step(t){
+    const dt=0.016, g=-9.0*dt*dt;
+    const wx=wind?(Math.sin(t*0.0013)*0.6+Math.sin(t*0.0041)*0.3)*0.03:0;
+    const wz=wind?(0.5+0.5*Math.sin(t*0.0017))*0.11:0;
+    for(let i=0;i<CW*CH;i++){ if(pin[i])continue;
+      const vx=(px[i]-ox[i])*0.99, vy=(py[i]-oy[i])*0.99, vz=(pz[i]-oz[i])*0.99;
+      ox[i]=px[i];oy[i]=py[i];oz[i]=pz[i];
+      px[i]+=vx+wx; py[i]+=vy+g; pz[i]+=vz+wz*(0.5+0.5*Math.sin(i*0.3+t*0.003));
+    }
+    // mouse grab / tear
+    if(mouse.d){
+      const R=mouse.btn===2?1.6:2.2;
+      for(let i=0;i<CW*CH;i++){ const dx=px[i]-mouse.x,dy=py[i]-mouse.y; if(dx*dx+dy*dy<R*R){
+        if(mouse.btn===2){ /* tear */ } else if(!pin[i]){ px[i]+= (mouse.x-mouse.px)*0.6; py[i]+=(mouse.y-mouse.py)*0.6; }
+      }}
+      if(mouse.btn===2){ cons=cons.filter(c=>{const a=c[0],b=c[1];const mx=(px[a]+px[b])*0.5,my=(py[a]+py[b])*0.5;return (mx-mouse.x)**2+(my-mouse.y)**2 > R*R;}); }
+    }
+    // constraints
+    for(let it=0;it<5;it++) for(const c of cons){const a=c[0],b=c[1];
+      let dx=px[b]-px[a],dy=py[b]-py[a],dz=pz[b]-pz[a];const dl=Math.hypot(dx,dy,dz)||1e-4;const diff=(dl-c[2])/dl*0.5;
+      dx*=diff;dy*=diff;dz*=diff;
+      if(!pin[a]){px[a]+=dx;py[a]+=dy;pz[a]+=dz;} if(!pin[b]){px[b]-=dx;py[b]-=dy;pz[b]-=dz;}
+    }
+  }
+  function build(){
+    for(let i=0;i<CW*CH;i++){pos[i*3]=px[i];pos[i*3+1]=py[i];pos[i*3+2]=pz[i];nrm[i*3]=0;nrm[i*3+1]=0;nrm[i*3+2]=0;}
+    for(let y=0;y<CH-1;y++)for(let x=0;x<CW-1;x++){const i=y*CW+x;
+      const ax=px[i+1]-px[i],ay=py[i+1]-py[i],az=pz[i+1]-pz[i];
+      const bx=px[i+CW]-px[i],by=py[i+CW]-py[i],bz=pz[i+CW]-pz[i];
+      const nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+      for(const j of [i,i+1,i+CW,i+CW+1]){nrm[j*3]+=nx;nrm[j*3+1]+=ny;nrm[j*3+2]+=nz;}}
+  }
+  function frame(t){
+    rs();step(t);build();
+    gl.bindBuffer(gl.ARRAY_BUFFER,pbuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER,nbuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,nrm);
+    gl.viewport(0,0,cv.width,cv.height);gl.clearColor(0.043,0.051,0.07,1);gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(Au.aspect,aspect);gl.uniform1f(Au.scale,SCALE);
+    gl.bindVertexArray(vao);gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_INT,0);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

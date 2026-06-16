@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audio Visualizer</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  canvas{display:block;width:100vw;height:100vh}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#b8f0ff;opacity:.88;user-select:none}#t b{color:#6fe0ff}
+  #t button{margin-left:8px;cursor:pointer;font:11px ui-monospace,monospace;color:#cdd6f4;background:rgba(111,224,255,.14);border:1px solid rgba(111,224,255,.4);border-radius:5px;padding:3px 8px}
+  #t button.on{background:rgba(166,227,161,.22);border-color:rgba(166,227,161,.5);color:#a6e3a1}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>♫ AUDIO VISUALIZER</b> · <span id="src">synth</span> <button id="mic">🎤 Mic</button> <button id="p">Palette</button></div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 not supported</p>";return;}
+  const NB=128;
+  const vs=`#version 300 es
+  layout(location=0) in vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }`;
+  const fs=`#version 300 es
+  precision highp float;
+  uniform vec2 u_res; uniform float u_time, u_bass, u_pal; uniform sampler2D u_fft;
+  out vec4 o;
+  vec3 pal(float t,float m){
+    if(m<0.5) return 0.5+0.5*cos(6.2831*(t+vec3(0.0,0.33,0.66)));
+    if(m<1.5) return vec3(t,pow(t,1.6)*0.8,1.2-t);
+    return vec3(1.2-t*0.6,t*0.9,0.4+t*0.6);
+  }
+  void main(){
+    vec2 uv=(gl_FragCoord.xy*2.-u_res)/u_res.y;
+    float r=length(uv), a=atan(uv.y,uv.x);
+    float bin=abs(a)/3.14159;                    // 0..1 mirrored
+    float m=texture(u_fft,vec2(bin,0.5)).r;
+    float R0=0.35+u_bass*0.12;                    // ring pulses with bass
+    vec3 col=vec3(0.);
+    // radial spectrum bars
+    float bar=smoothstep(0.012,0.0,abs(r-(R0+m*0.45)));
+    float fill=smoothstep(R0+m*0.45,R0,r)*step(R0,r);
+    vec3 c=pal(bin*0.8+u_time*0.03,u_pal);
+    col+=c*(bar*1.4+fill*0.5);
+    // inner waveform ring
+    float wob=m*0.06*sin(a*40.+u_time*4.);
+    col+=c*smoothstep(0.01,0.,abs(r-(R0-0.05)+wob))*0.8;
+    // bass core glow
+    col+=pal(u_time*0.05,u_pal)*exp(-r*3.5)*(0.3+u_bass*1.4);
+    // faint particles
+    col+=c*exp(-abs(r-R0*1.6)*8.)*m*0.5;
+    col=col/(col+0.7)*1.5;                         // tonemap
+    o=vec4(pow(col,vec3(0.85)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  const pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);
+  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw gl.getProgramInfoLog(pr);
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  const fftTex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,fftTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,NB,1,0,gl.RED,gl.UNSIGNED_BYTE,new Uint8Array(NB));
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  const U={res:gl.getUniformLocation(pr,"u_res"),time:gl.getUniformLocation(pr,"u_time"),bass:gl.getUniformLocation(pr,"u_bass"),pal:gl.getUniformLocation(pr,"u_pal"),fft:gl.getUniformLocation(pr,"u_fft")};
+  let pal=0,analyser=null,real=null;
+  const fft=new Uint8Array(NB);
+  // synthetic spectrum (always animates, no permission needed)
+  function synth(t){
+    const beat=Math.pow(0.5+0.5*Math.sin(t*3.2),6.0);            // kick
+    for(let i=0;i<NB;i++){
+      const f=i/NB;
+      let v=Math.exp(-f*3.0)*(0.5+beat*0.6);                     // bass-heavy
+      v+=0.35*Math.exp(-Math.pow((f-0.3-0.12*Math.sin(t*0.7)),2)*60.);
+      v+=0.25*Math.exp(-Math.pow((f-0.55-0.1*Math.sin(t*1.3)),2)*120.);
+      v+=0.18*Math.abs(Math.sin(f*40.+t*5.))*Math.exp(-f*1.2);   // treble sparkle
+      v*=0.8+0.2*Math.sin(t*2.+f*10.);
+      fft[i]=Math.max(0,Math.min(255,v*255));
+    }
+  }
+  document.getElementById("p").onclick=()=>pal=(pal+1)%3;
+  const micBtn=document.getElementById("mic");
+  micBtn.onclick=async()=>{
+    if(real){ real.getTracks().forEach(t=>t.stop()); real=null; analyser=null; micBtn.classList.remove("on"); document.getElementById("src").textContent="synth"; return; }
+    try{
+      real=await navigator.mediaDevices.getUserMedia({audio:true});
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      const src=ac.createMediaStreamSource(real); analyser=ac.createAnalyser(); analyser.fftSize=256; analyser.smoothingTimeConstant=0.75; src.connect(analyser);
+      micBtn.classList.add("on"); document.getElementById("src").textContent="mic";
+    }catch(e){ alert("Mic access denied — staying on synth."); real=null; }
+  };
+  const raw=new Uint8Array(256);
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;}
+  addEventListener("resize",rs);rs();gl.useProgram(pr);
+  function frame(t){
+    rs();gl.viewport(0,0,cv.width,cv.height);const tm=t*0.001;
+    if(analyser){ analyser.getByteFrequencyData(raw); for(let i=0;i<NB;i++) fft[i]=raw[i]; }
+    else synth(tm);
+    let bass=0; for(let i=0;i<12;i++) bass+=fft[i]; bass=bass/12/255;
+    gl.bindTexture(gl.TEXTURE_2D,fftTex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,NB,1,gl.RED,gl.UNSIGNED_BYTE,fft);
+    gl.uniform2f(U.res,cv.width,cv.height);gl.uniform1f(U.time,tm);gl.uniform1f(U.bass,bass);gl.uniform1f(U.pal,pal);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,fftTex);gl.uniform1i(U.fft,0);
+    gl.drawArrays(gl.TRIANGLES,0,3);requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
