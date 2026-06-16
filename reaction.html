@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reaction–Diffusion</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  canvas{display:block;width:100vw;height:100vh;cursor:crosshair;touch-action:none}
+  #t{position:fixed;top:12px;left:14px;font:12px ui-monospace,Menlo,monospace;color:#cdeede;opacity:.8;user-select:none}#t b{color:#a6e3a1}
+  #t button{margin-left:8px;cursor:pointer;font:11px ui-monospace,monospace;color:#cdd6f4;background:rgba(166,227,161,.12);border:1px solid rgba(166,227,161,.35);border-radius:5px;padding:3px 8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="t"><b>⬡ REACTION–DIFFUSION</b> · Gray-Scott · drag to seed <button id="r">Reset</button> <button id="p">Pattern</button></div>
+<script>
+"use strict";
+(function(){
+  const cv=document.getElementById("c"), gl=cv.getContext("webgl2");
+  if(!gl||!gl.getExtension("EXT_color_buffer_float")){document.body.innerHTML="<p style='color:#f88;font:16px monospace;padding:40px'>WebGL2 + float buffers required</p>";return;}
+  const RES=512;
+  const vs=`#version 300 es
+  layout(location=0) in vec2 p; out vec2 uv; void main(){ uv=p*.5+.5; gl_Position=vec4(p,0.,1.); }`;
+  const simFS=`#version 300 es
+  precision highp float; in vec2 uv; uniform sampler2D u_s; uniform vec2 u_tx;
+  uniform float u_f,u_k,u_seed; uniform vec2 u_m; uniform float u_md;
+  out vec4 o;
+  void main(){
+    vec2 c=texture(u_s,uv).xy;
+    vec2 l=( texture(u_s,uv+vec2(-u_tx.x,0)).xy+texture(u_s,uv+vec2(u_tx.x,0)).xy
+            +texture(u_s,uv+vec2(0,-u_tx.y)).xy+texture(u_s,uv+vec2(0,u_tx.y)).xy )*0.2
+          +( texture(u_s,uv+vec2(-u_tx.x,-u_tx.y)).xy+texture(u_s,uv+vec2(u_tx.x,-u_tx.y)).xy
+            +texture(u_s,uv+vec2(-u_tx.x,u_tx.y)).xy+texture(u_s,uv+vec2(u_tx.x,u_tx.y)).xy )*0.05 - c;
+    float A=c.x,B=c.y, r=A*B*B;
+    A+=(1.0*l.x - r + u_f*(1.0-A));
+    B+=(0.5*l.y + r - (u_k+u_f)*B);
+    if(u_md>0.5){ float d=length((uv-u_m)*vec2(u_tx.y/u_tx.x,1.)); if(d<0.012) B=0.9; }
+    if(u_seed>0.5 && length(uv-0.5)<0.02) B=0.9;
+    o=vec4(clamp(A,0.,1.),clamp(B,0.,1.),0,1);
+  }`;
+  const showFS=`#version 300 es
+  precision highp float; in vec2 uv; uniform sampler2D u_s; uniform float u_t; out vec4 o;
+  vec3 pal(float t){ return 0.5+0.5*cos(6.2831*(t+vec3(0.0,0.35,0.6))); }
+  void main(){
+    float B=texture(u_s,uv).y;
+    vec3 c=pal(B*1.6+u_t*0.02)*smoothstep(0.05,0.35,B);
+    c+=vec3(0.02,0.04,0.07);
+    o=vec4(pow(c,vec3(0.9)),1.);
+  }`;
+  function sh(t,s){const x=gl.createShader(t);gl.shaderSource(x,s);gl.compileShader(x);if(!gl.getShaderParameter(x,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(x);return x;}
+  function prog(f){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,f));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw gl.getProgramInfoLog(p);return p;}
+  const simP=prog(simFS), showP=prog(showFS);
+  const vao=gl.createVertexArray();gl.bindVertexArray(vao);const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  function tex(data){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA16F,RES,RES,0,gl.RGBA,gl.FLOAT,data);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);return t;}
+  let A=[],F=[],cur=0;
+  function reset(){
+    A.forEach(t=>gl.deleteTexture(t));F.forEach(f=>gl.deleteFramebuffer(f));A=[];F=[];
+    const d=new Float32Array(RES*RES*4);
+    for(let i=0;i<RES*RES;i++){d[i*4]=1;d[i*4+1]=0;d[i*4+3]=1;}
+    for(let s=0;s<20;s++){const x=(Math.random()*RES)|0,y=(Math.random()*RES)|0;for(let dy=-4;dy<4;dy++)for(let dx=-4;dx<4;dx++){const xx=(x+dx+RES)%RES,yy=(y+dy+RES)%RES;d[(yy*RES+xx)*4+1]=0.9;}}
+    A=[tex(d),tex(d)];F=[gl.createFramebuffer(),gl.createFramebuffer()];
+    for(let i=0;i<2;i++){gl.bindFramebuffer(gl.FRAMEBUFFER,F[i]);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,A[i],0);}
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);cur=0;
+  }
+  // feed/kill presets (different patterns)
+  const PRESETS=[[0.037,0.06],[0.029,0.057],[0.018,0.051],[0.046,0.063],[0.026,0.061],[0.014,0.054]];
+  let pi=0;
+  const Su={s:gl.getUniformLocation(simP,"u_s"),tx:gl.getUniformLocation(simP,"u_tx"),f:gl.getUniformLocation(simP,"u_f"),k:gl.getUniformLocation(simP,"u_k"),seed:gl.getUniformLocation(simP,"u_seed"),m:gl.getUniformLocation(simP,"u_m"),md:gl.getUniformLocation(simP,"u_md")};
+  const Du={s:gl.getUniformLocation(showP,"u_s"),t:gl.getUniformLocation(showP,"u_t")};
+  const mouse={x:0,y:0,d:0};
+  cv.addEventListener("pointerdown",e=>{mouse.d=1;upd(e);});window.addEventListener("pointerup",()=>mouse.d=0);
+  cv.addEventListener("pointermove",e=>{if(mouse.d)upd(e);});
+  function upd(e){const r=cv.getBoundingClientRect();mouse.x=(e.clientX-r.left)/r.width;mouse.y=1-(e.clientY-r.top)/r.height;}
+  document.getElementById("r").onclick=reset;
+  document.getElementById("p").onclick=()=>{pi=(pi+1)%PRESETS.length;};
+  function rs(){const d=Math.min(devicePixelRatio||1,2);cv.width=cv.clientWidth*d;cv.height=cv.clientHeight*d;}
+  addEventListener("resize",rs);rs();reset();
+  function frame(t){
+    rs();
+    gl.useProgram(simP);gl.bindVertexArray(vao);gl.viewport(0,0,RES,RES);
+    gl.uniform2f(Su.tx,1/RES,1/RES);gl.uniform1f(Su.f,PRESETS[pi][0]);gl.uniform1f(Su.k,PRESETS[pi][1]);
+    for(let it=0;it<22;it++){
+      const nx=1-cur;gl.bindFramebuffer(gl.FRAMEBUFFER,F[nx]);
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,A[cur]);gl.uniform1i(Su.s,0);
+      gl.uniform1f(Su.seed,0);gl.uniform1f(Su.md,(mouse.d&&it===0)?1:0);gl.uniform2f(Su.m,mouse.x,mouse.y);
+      gl.drawArrays(gl.TRIANGLES,0,3);cur=nx;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,cv.width,cv.height);
+    gl.useProgram(showP);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,A[cur]);gl.uniform1i(Du.s,0);gl.uniform1f(Du.t,t*0.001);
+    gl.drawArrays(gl.TRIANGLES,0,3);requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
